@@ -1,6 +1,5 @@
-// IA (Claude) : assistant acheteur, aide à la rédaction d'annonces, modération automatique, bot WhatsApp.
-// Sans ANTHROPIC_API_KEY, tout est désactivé et la plateforme fonctionne comme avant.
-import Anthropic from "@anthropic-ai/sdk";
+// IA (Google Gemini) : assistant acheteur, aide à la rédaction d'annonces, modération automatique, bot WhatsApp.
+// Sans GEMINI_API_KEY, tout est désactivé et la plateforme fonctionne comme avant.
 import { existsSync, readFileSync } from "node:fs";
 import { extname, join } from "node:path";
 import { UPLOAD_DIR, all, one, run } from "./db.js";
@@ -19,22 +18,21 @@ import {
   SIZES,
 } from "./rules.js";
 
-export const AI_ENABLED = !!(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
-const MODEL = process.env.AI_MODEL || "claude-opus-5-5";
-// Si le modèle refuse une demande, l'API la relance sur un autre modèle (Claude API, modèles récents uniquement)
-const FALLBACK = /^claude-(opus-5|fable-5|sonnet-5-5)/.test(MODEL);
+// Clé collée avec des espaces ou des guillemets dans Render : on nettoie
+const KEY = (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim().replace(/^["']|["']$/g, "");
+export const AI_ENABLED = !!KEY;
+// Modèles essayés dans l'ordre : si l'un est introuvable ou a épuisé son quota gratuit, on passe au suivant
+const MODELS = [...new Set([process.env.AI_MODEL, "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite"].filter(Boolean))];
 // « hold » : une annonce jugée interdite repasse en attente de validation ; « flag » : simple signal à l'admin
 const MODERATION = process.env.AI_MODERATION === "flag" ? "flag" : "hold";
 const DAILY_LIMIT = Number(process.env.AI_DAILY_LIMIT || 2000);
 const PUBLIC_URL = () => process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || "http://localhost:4000";
+const API = process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com/v1beta";
 
-let client;
-// Clé collée avec des espaces ou des guillemets dans Render : on nettoie
-const KEY = process.env.ANTHROPIC_API_KEY?.trim().replace(/^["']|["']$/g, "");
-const claude = () => (client ??= KEY ? new Anthropic({ apiKey: KEY }) : new Anthropic());
 let lastError = null; // dernière erreur de l'API, affichée dans Admin → Intégrations
+let lastModel = null; // dernier modèle qui a répondu
 
-// Plafond d'appels par jour : protège la facture si quelqu'un abuse de l'assistant
+// Plafond d'appels par jour : protège le quota si quelqu'un abuse de l'assistant
 const usage = { day: "", n: 0 };
 function spend() {
   const day = new Date().toISOString().slice(0, 10);
@@ -43,45 +41,76 @@ function spend() {
   usage.n++;
 }
 
-async function call(params) {
+const unavailable = (busy) =>
+  Object.assign(new Error(busy ? "L'assistant est surchargé. Réessaie dans une minute." : "Assistant IA indisponible pour le moment."), { status: 503 });
+
+async function call(body) {
   if (!AI_ENABLED) throw Object.assign(new Error("Assistant IA non configuré."), { status: 503 });
   spend();
-  let r;
-  try {
-    r = await claude().beta.messages.create({
-      model: MODEL,
-      max_tokens: 16000,
-      ...(FALLBACK ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" } : {}),
-      ...params,
-    });
-  } catch (e) {
-    // Erreur de l'API (clé invalide, quota, panne) : détail dans les logs, message simple pour l'utilisateur
-    if (!(e instanceof Anthropic.APIError)) throw e;
-    console.error("Claude API", e.status, e.message);
-    lastError = { status: e.status ?? null, message: String(e.message).slice(0, 300), at: Date.now() };
-    const busy = e instanceof Anthropic.RateLimitError || e instanceof Anthropic.InternalServerError;
-    throw Object.assign(new Error(busy ? "L'assistant est surchargé. Réessaie dans une minute." : "Assistant IA indisponible pour le moment."), { status: 503 });
+  let busy = false;
+  for (const model of MODELS) {
+    let res, data;
+    try {
+      res = await fetch(`${API}/models/${model}:generateContent`, {
+        method: "POST",
+        headers: { "x-goog-api-key": KEY, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(60_000),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      lastError = { status: null, message: `Réseau : ${e.message}`, at: Date.now() };
+      console.error("Gemini", model, e.message);
+      busy = true;
+      continue;
+    }
+    if (res.ok) {
+      lastModel = model;
+      lastError = null;
+      const c = data.candidates?.[0];
+      if (data.promptFeedback?.blockReason || !c?.content || ["SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII"].includes(c.finishReason))
+        throw Object.assign(new Error("Demande refusée par l'assistant."), { status: 422, refusal: true });
+      return c;
+    }
+    // Détail dans les logs et l'admin, message simple pour l'utilisateur
+    const message = String(data.error?.message || res.statusText).slice(0, 300);
+    lastError = { status: res.status, message: `${model} : ${message}`, at: Date.now() };
+    console.error("Gemini", model, res.status, message);
+    // Modèle inconnu, quota épuisé ou surcharge : on essaie le modèle suivant ; clé refusée : inutile d'insister
+    if (res.status === 404 || res.status === 429 || res.status >= 500) {
+      busy ||= res.status !== 404;
+      continue;
+    }
+    throw unavailable(false);
   }
-  if (r.stop_reason === "refusal") throw Object.assign(new Error("Demande refusée par l'assistant."), { status: 422, refusal: true });
-  return r;
+  throw unavailable(busy);
 }
 
-const textOf = (r) =>
-  r.content
-    .filter((b) => b.type === "text")
-    .map((b) => b.text)
+const textOf = (c) =>
+  (c.content.parts || [])
+    .filter((p) => p.text && !p.thought)
+    .map((p) => p.text)
     .join("\n")
     .trim();
 
-// Réponse JSON garantie conforme au schéma
-async function structured(system, content, schema, effort = "low") {
-  const r = await call({
-    system,
-    messages: [{ role: "user", content }],
-    output_config: { effort, format: { type: "json_schema", schema } },
+// Gemini accepte un sous-ensemble d'OpenAPI : on retire ce qu'il ne connaît pas
+function toGemini(schema) {
+  if (Array.isArray(schema)) return schema.map(toGemini);
+  if (!schema || typeof schema !== "object") return schema;
+  const out = {};
+  for (const [k, v] of Object.entries(schema)) if (k !== "additionalProperties") out[k] = k === "enum" ? v : toGemini(v);
+  return out;
+}
+
+// Réponse JSON conforme au schéma
+async function structured(system, parts, schema) {
+  const c = await call({
+    systemInstruction: { parts: [{ text: system }] },
+    contents: [{ role: "user", parts }],
+    generationConfig: { responseMimeType: "application/json", responseSchema: toGemini(schema) },
   });
-  if (r.stop_reason === "max_tokens") throw new Error("Réponse IA incomplète.");
-  return JSON.parse(textOf(r));
+  if (c.finishReason === "MAX_TOKENS") throw new Error("Réponse IA incomplète.");
+  return JSON.parse(textOf(c));
 }
 
 // ---------- Images ----------
@@ -89,11 +118,11 @@ const MEDIA = { ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png"
 function imageBlock(src) {
   const s = String(src || "");
   const m = /^data:(image\/(?:jpeg|png|webp|gif));base64,(.+)$/.exec(s);
-  if (m) return { type: "image", source: { type: "base64", media_type: m[1], data: m[2] } };
+  if (m) return { inlineData: { mimeType: m[1], data: m[2] } };
   if (s.startsWith("/uploads/")) {
     const file = join(UPLOAD_DIR, s.slice("/uploads/".length).replace(/[^\w.-]/g, ""));
     const type = MEDIA[extname(file).toLowerCase()];
-    if (type && existsSync(file)) return { type: "image", source: { type: "base64", media_type: type, data: readFileSync(file).toString("base64") } };
+    if (type && existsSync(file)) return { inlineData: { mimeType: type, data: readFileSync(file).toString("base64") } };
   }
   return null;
 }
@@ -248,31 +277,35 @@ Comment répondre :
 - Canal site web : 120 mots maximum. Pour enchérir, l'utilisateur ouvre la fiche de la vente.`
 }`;
 
-// Boucle d'outils : Claude cherche dans la base puis répond
+// Boucle d'outils : Gemini cherche dans la base puis répond
 async function runAssistant({ messages, user, channel, onPropose }) {
-  const tools = [...TOOLS, ...(onPropose ? [PROPOSE_BID] : [])];
+  const declarations = [...TOOLS, ...(onPropose ? [PROPOSE_BID] : [])].map(({ name, description, input_schema }) => ({
+    name,
+    description,
+    ...(Object.keys(input_schema.properties).length ? { parameters: toGemini(input_schema) } : {}),
+  }));
   const seen = new Map();
-  const convo = [...messages];
+  const contents = messages.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] }));
   for (let step = 0; step < 6; step++) {
-    const r = await call({
-      system: [{ type: "text", text: ASSISTANT_SYSTEM(channel), cache_control: { type: "ephemeral" } }],
-      tools,
-      messages: convo,
-      output_config: { effort: "low" },
+    const c = await call({
+      systemInstruction: { parts: [{ text: ASSISTANT_SYSTEM(channel) }] },
+      tools: [{ functionDeclarations: declarations }],
+      contents,
     });
-    if (r.stop_reason !== "tool_use") return { reply: textOf(r), auctions: [...seen.values()] };
-    convo.push({ role: "assistant", content: r.content });
-    const results = [];
-    for (const b of r.content.filter((x) => x.type === "tool_use")) {
+    const calls = (c.content.parts || []).filter((p) => p.functionCall);
+    if (!calls.length) return { reply: textOf(c), auctions: [...seen.values()] };
+    // Contenu du modèle renvoyé tel quel (il porte les signatures de raisonnement)
+    contents.push(c.content);
+    const results = calls.map(({ functionCall: f }) => {
       let out;
       try {
-        out = runTool(b.name, b.input || {}, { user, onPropose, seen });
+        out = runTool(f.name, f.args || {}, { user, onPropose, seen });
       } catch (e) {
         out = { error: e.message };
       }
-      results.push({ type: "tool_result", tool_use_id: b.id, content: JSON.stringify(out), ...(out?.error ? { is_error: true } : {}) });
-    }
-    convo.push({ role: "user", content: results });
+      return { functionResponse: { ...(f.id ? { id: f.id } : {}), name: f.name, response: { result: out } } };
+    });
+    contents.push({ role: "user", parts: results });
   }
   return { reply: "Je n'ai pas réussi à répondre. Reformule ta question, ou envoie AIDE.", auctions: [...seen.values()] };
 }
@@ -331,7 +364,7 @@ const LISTING_SCHEMA = {
     description: { type: "string", description: "3 à 6 phrases factuelles : ce qu'on voit, état, défauts visibles, contenu du lot." },
     category: { type: "string", enum: CATEGORIES },
     condition: { type: "string", enum: CONDITIONS },
-    size: { type: "string", enum: ["", ...SIZES], description: "Taille ou pointure si visible ou indiquée, sinon vide." },
+    size: { type: "string", description: `Taille ou pointure si visible ou indiquée (${SIZES.join(", ")}), sinon chaîne vide.` },
     start_price: { type: "integer", description: "Prix de départ conseillé en FCFA, multiple de 500." },
     reserve_price: { type: "integer", description: "Prix de réserve conseillé en FCFA (0 si inutile), au-dessus du départ." },
     buy_now_price: { type: "integer", description: "Prix d'achat immédiat conseillé en FCFA (0 si inutile), au-dessus de la réserve." },
@@ -363,9 +396,8 @@ Signale dans warnings toute photo qui ne semble pas réelle (image de catalogue)
 
 Prix constatés sur Babylone ces 4 derniers mois :
 ${marketPrices()}`,
-    [...blocks, { type: "text", text: `Notes du vendeur : ${String(notes || "aucune").slice(0, 1000)}` }],
+    [...blocks, { text: `Notes du vendeur : ${String(notes || "aucune").slice(0, 1000)}` }],
     LISTING_SCHEMA,
-    "medium",
   );
 }
 
@@ -397,7 +429,6 @@ export async function reviewListing(auctionId) {
     [
       ...blocks,
       {
-        type: "text",
         text: `Annonce n° ${a.id}\nTitre : ${a.title}\nCatégorie : ${a.category}\nÉtat : ${a.condition}\nPrix de départ : ${fcfa(a.start_price)}${a.buy_now_price ? `\nAchat immédiat : ${fcfa(a.buy_now_price)}` : ""}\nDescription :\n${a.description || "(vide)"}`,
       },
     ],
@@ -422,4 +453,4 @@ export function reviewInBackground(auctionId) {
   reviewListing(auctionId).catch((e) => console.error("Modération IA", auctionId, e.message));
 }
 
-export const aiStatus = () => ({ enabled: AI_ENABLED, model: AI_ENABLED ? MODEL : null, moderation: MODERATION, calls_today: usage.n, daily_limit: DAILY_LIMIT, last_error: lastError });
+export const aiStatus = () => ({ enabled: AI_ENABLED, model: AI_ENABLED ? lastModel || MODELS[0] : null, moderation: MODERATION, calls_today: usage.n, daily_limit: DAILY_LIMIT, last_error: lastError });

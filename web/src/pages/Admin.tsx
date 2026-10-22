@@ -319,8 +319,8 @@ function Integrations({ i, reload }: { i: Data["integrations"]; reload: () => vo
     ["SMS Orange", "ORANGE_CLIENT_ID, ORANGE_CLIENT_SECRET, ORANGE_SMS_SENDER", i.sms, i.sms ? "Branché" : "Simulé (code affiché à l'écran)", "sms"],
     ["WhatsApp Cloud", "WHATSAPP_TOKEN, WHATSAPP_PHONE_ID, WHATSAPP_TEMPLATE", i.whatsapp, i.whatsapp ? "Branché" : "Simulé (journal Messages)", "whatsapp"],
     [
-      "Assistant IA (Claude)",
-      "ANTHROPIC_API_KEY, AI_MODEL, AI_MODERATION, AI_DAILY_LIMIT",
+      "Assistant IA (Gemini)",
+      "GEMINI_API_KEY, AI_MODEL, AI_MODERATION, AI_DAILY_LIMIT",
       i.ai.enabled,
       !i.ai.enabled
         ? "Non configuré"

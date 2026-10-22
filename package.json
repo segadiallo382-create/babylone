@@ -13,7 +13,6 @@
     "render-start": "node --no-warnings server/bootstrap.js && NODE_ENV=production node --no-warnings server/index.js"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "1.1.0",
     "@react-three/fiber": "8.17.10",
     "express": "4.21.1",
     "framer-motion": "11.11.17",
