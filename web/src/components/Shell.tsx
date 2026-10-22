@@ -31,7 +31,9 @@ export function Nav() {
   const t = useT();
   const loc = useLocation();
   const [open, setOpen] = useState(false);
-  useEffect(() => setOpen(false), [loc.pathname]);
+  useEffect(() => {
+    setOpen(false);
+  }, [loc.pathname]);
 
   return (
     <>

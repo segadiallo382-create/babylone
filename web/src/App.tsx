@@ -51,8 +51,13 @@ function Guard({ roles, children }: { roles?: string[]; children: ReactNode }) {
 export function App() {
   const loc = useLocation();
   const { meta } = useApp();
-  useEffect(() => window.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior }), [loc.pathname]);
-  useEffect(() => track("visit"), []);
+  // Accolades obligatoires : dans Chrome récent, scrollTo renvoie une valeur que React prendrait pour un nettoyage
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior });
+  }, [loc.pathname]);
+  useEffect(() => {
+    track("visit");
+  }, []);
   const bare = loc.pathname.startsWith("/paiement");
 
   return (

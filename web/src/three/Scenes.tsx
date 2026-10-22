@@ -304,7 +304,9 @@ function SpotCone({ x, color }: { x: number; color: string }) {
 
 function LookAt({ y }: { y: number }) {
   const { camera } = useThree();
-  useEffect(() => camera.lookAt(0, y, 0), [camera, y]);
+  useEffect(() => {
+    camera.lookAt(0, y, 0);
+  }, [camera, y]);
   return null;
 }
 

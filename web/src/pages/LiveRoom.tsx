@@ -86,7 +86,9 @@ export default function LiveRoom() {
     };
   }, [cur?.id, user?.id, load]);
 
-  useEffect(() => chatEnd.current?.scrollIntoView({ block: "nearest" }), [chat.length]);
+  useEffect(() => {
+    chatEnd.current?.scrollIntoView({ block: "nearest" });
+  }, [chat.length]);
 
   if (missing) return <div className="page container"><Empty title="Live introuvable." /></div>;
   if (!l) return <div className="page container"><div className="skeleton" style={{ height: 520 }} /></div>;

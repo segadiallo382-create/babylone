@@ -61,7 +61,9 @@ function OrderChat({ order }: { order: Order }) {
       socket.off("order:message", on);
     };
   }, [load, order.id]);
-  useEffect(() => end.current?.scrollIntoView({ block: "nearest" }), [items.length]);
+  useEffect(() => {
+    end.current?.scrollIntoView({ block: "nearest" });
+  }, [items.length]);
   async function send() {
     if (!body.trim() && !files.length) return;
     setBusy(true);
