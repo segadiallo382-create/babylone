@@ -10,7 +10,7 @@ import { attachUser, checkPassword, hashPassword, issueToken, publicUser, readTo
 import { BidError, auctionView, buyNow, fcfa, maskName, notify, placeBid, releaseFunds, setIO, tick } from "./engine.js";
 import { CATEGORIES, CITIES, COMMISSION_RATE, CONDITIONS, PRO_PRICE, increment } from "./rules.js";
 import { PAYDUNYA_ENABLED, REAL_PAYMENTS, WAVE_ENABLED, confirmPaydunya, createCheckout, verifyPaydunyaHash, verifyWaveSignature } from "./payments.js";
-import { SMS_ENABLED, WA_ENABLED, sendSMS } from "./messaging.js";
+import { SMS_ENABLED, WA_ENABLED, sendSMS, sendWhatsApp } from "./messaging.js";
 import { startDemo } from "./demo.js";
 
 const PROD = process.env.NODE_ENV === "production";
@@ -804,6 +804,15 @@ app.get(
          WHERE f.resolved = 0 ORDER BY f.id DESC LIMIT 50`,
       ),
       outbox: all("SELECT * FROM outbox ORDER BY id DESC LIMIT 40"),
+      integrations: {
+        paydunya: PAYDUNYA_ENABLED ? (process.env.PAYDUNYA_MODE === "live" ? "live" : "test") : null,
+        wave: WAVE_ENABLED,
+        sms: SMS_ENABLED,
+        whatsapp: WA_ENABLED,
+        demo: DEMO,
+        bots: DEMO && process.env.DEMO_BOTS !== "0",
+        public_url: process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || null,
+      },
     });
   }),
 );
@@ -837,6 +846,26 @@ app.post(
       notify(a.seller_id, "rejected", "Annonce refusée", `${a.title} : ${String(req.body.reason || "non conforme aux règles").slice(0, 200)}.`, "/vendeur");
     } else throw bad("Action inconnue.");
     res.json({ ok: true });
+  }),
+);
+
+// Tests des clés depuis l'admin : un vrai envoi, résultat affiché tel quel
+app.post(
+  "/api/admin/test/:channel",
+  requireRole("admin"),
+  wrap(async (req, res) => {
+    const phone = normPhone(req.body.phone || req.user.phone);
+    if (req.params.channel === "sms") {
+      await sendSMS(phone, "Babylone : test d'envoi SMS réussi.", req.user.id);
+    } else if (req.params.channel === "whatsapp") {
+      await sendWhatsApp({ id: req.user.id, phone, whatsapp: 1 }, "Test Babylone", "Les alertes WhatsApp fonctionnent.", "/");
+    } else if (req.params.channel === "payment") {
+      const c = await createCheckout({ id: 0, amount: 200, delivery_fee: 0 }, "wave", "Test de paiement Babylone");
+      return res.json({ ok: true, redirect: c.redirect, demo: c.demo });
+    } else throw bad("Canal inconnu.");
+    const last = one("SELECT status, error FROM outbox WHERE user_id = ? ORDER BY id DESC LIMIT 1", req.user.id);
+    if (last?.status === "failed") throw bad(`Échec : ${last.error}`, 502);
+    res.json({ ok: true, status: last?.status });
   }),
 );
 

@@ -12,8 +12,9 @@ type Data = {
   pending: Auction[];
   flags: { id: number; kind: string; detail: string; name: string; title: string; auction_id: number; user_id: number; created_at: number }[];
   outbox: { id: number; channel: string; recipient: string; body: string; status: string; error: string | null; created_at: number }[];
+  integrations: { paydunya: "live" | "test" | null; wave: boolean; sms: boolean; whatsapp: boolean; demo: boolean; bots: boolean; public_url: string | null };
 };
-type Tab = "orders" | "moderation" | "sellers" | "fraud" | "outbox";
+type Tab = "orders" | "moderation" | "sellers" | "fraud" | "outbox" | "integrations";
 
 export default function Admin() {
   const [d, setD] = useState<Data | null>(null);
@@ -73,10 +74,13 @@ export default function Admin() {
               ["sellers", "Vendeurs"],
               ["fraud", `Fraude · ${d.flags.length}`],
               ["outbox", "Messages"],
+              ["integrations", "Intégrations"],
             ]}
           />
         </div>
-        {tab === "moderation" ? (
+        {tab === "integrations" ? (
+          <Integrations i={d.integrations} reload={load} />
+        ) : tab === "moderation" ? (
           <div className="stack">
             {d.pending.length === 0 && <div className="empty card">Aucune annonce en attente.</div>}
             {d.pending.map((a) => (
@@ -253,6 +257,61 @@ export default function Admin() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function Integrations({ i, reload }: { i: Data["integrations"]; reload: () => void }) {
+  const { toast, user } = useApp();
+  const [phone, setPhone] = useState(user?.phone || "");
+  const [busy, setBusy] = useState("");
+  const test = async (channel: string) => {
+    setBusy(channel);
+    try {
+      const r = await post(`/admin/test/${channel}`, { phone });
+      if (r.redirect) window.open(r.redirect, "_blank");
+      toast(r.status === "simulated" || r.demo ? "Simulé : clé absente" : "Test envoyé", channel === "payment" ? "Page de paiement ouverte dans un nouvel onglet." : `Vérifie le téléphone ${phone}.`, "ok");
+    } catch (e: any) {
+      toast("Échec du test", e.message);
+    } finally {
+      setBusy("");
+      reload();
+    }
+  };
+  const rows: [string, string, boolean, string, string | null][] = [
+    ["Paiements PayDunya", "PAYDUNYA_MASTER_KEY, PAYDUNYA_PRIVATE_KEY, PAYDUNYA_TOKEN", !!i.paydunya, i.paydunya ? `Mode ${i.paydunya === "live" ? "réel" : "test (sandbox)"}` : "Non configuré", "payment"],
+    ["SMS Orange", "ORANGE_CLIENT_ID, ORANGE_CLIENT_SECRET, ORANGE_SMS_SENDER", i.sms, i.sms ? "Branché" : "Simulé (code affiché à l'écran)", "sms"],
+    ["WhatsApp Cloud", "WHATSAPP_TOKEN, WHATSAPP_PHONE_ID, WHATSAPP_TEMPLATE", i.whatsapp, i.whatsapp ? "Branché" : "Simulé (journal Messages)", "whatsapp"],
+    ["Mode démo", "DEMO_MODE, DEMO_BOTS", !i.demo, i.demo ? `Actif${i.bots ? ", acheteurs fictifs en marche" : ""}` : "Coupé", null],
+    ["Adresse publique", "PUBLIC_URL", !!i.public_url, i.public_url || "Non définie", null],
+  ];
+  return (
+    <div className="stack">
+      <div className="card pad row wrap" style={{ gap: 12 }}>
+        <label className="field" style={{ flex: 1, minWidth: 220 }}>
+          <span>Numéro qui reçoit les tests</span>
+          <input className="input num" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="77 123 45 67" />
+        </label>
+      </div>
+      {rows.map(([name, vars, ok, state, channel]) => (
+        <div key={name} className="card pad row between wrap" style={{ gap: 12 }}>
+          <span>
+            <b>{name}</b>
+            <div className="muted num" style={{ fontSize: 12.5 }}>{vars}</div>
+          </span>
+          <span className="row">
+            <span className={`chip ${ok ? "chip-ok" : "chip-warn"}`}>{state}</span>
+            {channel && (
+              <button className="btn btn-ghost btn-sm" disabled={!!busy} onClick={() => test(channel)}>
+                {busy === channel ? "Test…" : "Tester"}
+              </button>
+            )}
+          </span>
+        </div>
+      ))}
+      <p className="muted" style={{ fontSize: 13 }}>
+        Les clés se règlent dans Render → Environment. Chaque enregistrement relance le serveur, environ une minute.
+      </p>
     </div>
   );
 }
