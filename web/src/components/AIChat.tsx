@@ -5,6 +5,7 @@ import { Auction, post } from "../lib/api";
 import { money } from "../lib/format";
 import { useApp } from "../lib/store";
 import { IClose, ISparkle } from "./Icons";
+import { SupportWhatsApp } from "./Share";
 
 type Msg = { role: "user" | "assistant"; content: string; auctions?: Auction[] };
 
@@ -67,7 +68,9 @@ export function AIChat() {
           >
             <div className="ai-head">
               <b>Assistant Babylone</b>
-              <span className="muted">Trouve un produit, pose une question</span>
+              <span className="muted">
+                Trouve un produit, pose une question · <SupportWhatsApp label="parler à un humain" className="red" />
+              </span>
             </div>
             <div className="ai-body">
               {msgs.length === 0 && (

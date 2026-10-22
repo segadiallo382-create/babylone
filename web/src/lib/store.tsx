@@ -69,6 +69,7 @@ type Meta = {
   deposit_amount: number;
   deposit_threshold: number;
   ai?: boolean;
+  support_whatsapp?: string | null;
 };
 
 type Ctx = {

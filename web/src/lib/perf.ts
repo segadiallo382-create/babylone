@@ -30,4 +30,6 @@ export function setLiteMode(on: boolean) {
   location.reload();
 }
 
+// Discussion avec le support Babylone (numéro au format international, ex. 221771234567)
+export const whatsappTo = (phone: string, text: string) => `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
 export const whatsappShare = (text: string, url: string) => `https://wa.me/?text=${encodeURIComponent(`${text} ${url}`)}`;

@@ -7,6 +7,7 @@ import { setLang, useLang, useT } from "../lib/i18n";
 import { useApp, useFeed } from "../lib/store";
 import { IBell, ICheck, IClose, IGavel, IGrid, IHome, ILogout, IMegaphone, IMenu, IStore, IUser } from "./Icons";
 import { Logo } from "./ui";
+import { SupportWhatsApp } from "./Share";
 
 const LINKS: [string, string][] = [
   ["/encheres", "Enchères"],
@@ -330,6 +331,7 @@ export function Footer() {
             <Link to="/regles">Règles des enchères</Link>
             <Link to="/cgu">Conditions générales</Link>
             <Link to="/confidentialite">Confidentialité</Link>
+            <SupportWhatsApp label="Support WhatsApp" className="" />
             <button className="muted" style={{ padding: "4px 0", fontSize: 15 }} onClick={() => setLiteMode(!liteMode())}>
               Mode allégé : {liteMode() ? "activé" : "désactivé"}
             </button>

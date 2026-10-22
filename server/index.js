@@ -298,6 +298,7 @@ app.get("/api/meta", (_req, res) =>
     sms: SMS_ENABLED,
     whatsapp: WA_ENABLED,
     ai: AI_ENABLED,
+    support_whatsapp: String(process.env.SUPPORT_WHATSAPP || "").replace(/\D/g, "") || null,
   }),
 );
 

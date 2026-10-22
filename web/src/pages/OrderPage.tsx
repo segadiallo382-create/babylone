@@ -3,6 +3,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { IBox, ICheck, IPin, IShield, ITruck, IWallet } from "../components/Icons";
 import { Stars } from "../components/ui";
+import { SupportWhatsApp } from "../components/Share";
 import { api, post, type Order, type Relay } from "../lib/api";
 import { ORDER_STATUS, ago, fcfa, resizeImage, shortLeft } from "../lib/format";
 import { socket, useApp, useNow } from "../lib/store";
@@ -382,6 +383,7 @@ export default function OrderPage() {
               <button className="btn btn-ghost" onClick={() => setDispute(true)}>
                 Signaler un problème
               </button>
+              <SupportWhatsApp text={`Bonjour Babylone, j'ai besoin d'aide pour la commande n° ${o.id}.`} label="Aide sur WhatsApp" className="btn btn-ghost" />
             </div>
             {err && <p className="err" style={{ marginTop: 10 }}>{err}</p>}
           </div>
