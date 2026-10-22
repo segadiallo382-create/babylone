@@ -99,7 +99,7 @@ const plain = (t) =>
     .replace(/\*\*(.+?)\*\*/g, "$1")
     .replace(/\[([^\]]+)\]\((\S+?)\)/g, (_, label, url) => (label === url ? url : `${label} (${url})`))
     .replace(/^#+\s*/gm, "")
-    .replace(/^\s*[*-]\s+/gm, "• ");
+    .replace(/^[ \t]*[*-][ \t]+/gm, "• ");
 
 // Gemini accepte un sous-ensemble d'OpenAPI : on retire ce qu'il ne connaît pas
 function toGemini(schema) {
