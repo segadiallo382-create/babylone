@@ -93,6 +93,14 @@ const textOf = (c) =>
     .join("\n")
     .trim();
 
+// Le chat et WhatsApp affichent du texte brut : on retire le Markdown que le modèle ajoute parfois
+const plain = (t) =>
+  t
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/\[([^\]]+)\]\((\S+?)\)/g, (_, label, url) => (label === url ? url : `${label} (${url})`))
+    .replace(/^#+\s*/gm, "")
+    .replace(/^\s*[*-]\s+/gm, "• ");
+
 // Gemini accepte un sous-ensemble d'OpenAPI : on retire ce qu'il ne connaît pas
 function toGemini(schema) {
   if (Array.isArray(schema)) return schema.map(toGemini);
@@ -274,7 +282,7 @@ Comment répondre :
 - Pour enchérir, appelle propose_bid puis dis à l'utilisateur de répondre OUI pour confirmer.
 - Commandes du bot à rappeler si utile : VENTES, <numéro>, E <numéro> <montant>, OUI, MES ENCHERES, STOP.`
     : `
-- Canal site web : 120 mots maximum. Pour enchérir, l'utilisateur ouvre la fiche de la vente.`
+- Canal site web : 120 mots maximum, texte simple sans Markdown (les ventes trouvées s'affichent en cartes sous ta réponse). Pour enchérir, l'utilisateur ouvre la fiche de la vente.`
 }`;
 
 // Boucle d'outils : Gemini cherche dans la base puis répond
@@ -293,7 +301,7 @@ async function runAssistant({ messages, user, channel, onPropose }) {
       contents,
     });
     const calls = (c.content.parts || []).filter((p) => p.functionCall);
-    if (!calls.length) return { reply: textOf(c), auctions: [...seen.values()] };
+    if (!calls.length) return { reply: plain(textOf(c)), auctions: [...seen.values()] };
     // Contenu du modèle renvoyé tel quel (il porte les signatures de raisonnement)
     contents.push(c.content);
     const results = calls.map(({ functionCall: f }) => {
