@@ -15,6 +15,7 @@ import { startDemo } from "./demo.js";
 import { buyerReliability, deviceFlags, notifyMatches, onPaid, registerV3, trackEvent } from "./v3.js";
 import { queuePayout } from "./payouts.js";
 import { searchText } from "./text.js";
+import { AI_ENABLED, aiStatus, chat, draftListing, reviewInBackground } from "./ai.js";
 import { RELAY_FEE, SIZES, DEPOSIT_AMOUNT, DEPOSIT_THRESHOLD } from "./rules.js";
 
 const PROD = process.env.NODE_ENV === "production";
@@ -101,6 +102,7 @@ setInterval(() => {
 app.use("/api", limit("api", 400));
 app.use("/api/auctions/:id/bid", limit("bid", 40));
 app.use("/api/auth", limit("auth", 20));
+app.use("/api/ai", limit("ai", 12));
 app.use(express.json({ limit: "25mb", verify: (req, _res, buf) => (req.rawBody = buf) }));
 app.use(attachUser);
 app.use("/uploads", express.static(UPLOAD_DIR, { maxAge: "30d", immutable: true }));
@@ -295,7 +297,19 @@ app.get("/api/meta", (_req, res) =>
     deposit_threshold: DEPOSIT_THRESHOLD,
     sms: SMS_ENABLED,
     whatsapp: WA_ENABLED,
+    ai: AI_ENABLED,
   }),
+);
+
+// ---------- Assistant IA ----------
+app.post(
+  "/api/ai/chat",
+  wrap(async (req, res) => res.json(await chat(req.body.messages, req.user))),
+);
+app.post(
+  "/api/ai/listing",
+  requireRole("seller", "admin"),
+  wrap(async (req, res) => res.json({ draft: await draftListing({ images: req.body.images, notes: req.body.notes }) })),
 );
 
 // ---------- Ventes ----------
@@ -436,6 +450,7 @@ app.post(
     );
     run("UPDATE auctions SET search_text = ? WHERE id = ?", searchText(one("SELECT * FROM auctions WHERE id = ?", r.lastInsertRowid)), r.lastInsertRowid);
     const a = one("SELECT * FROM auctions WHERE id = ?", r.lastInsertRowid);
+    reviewInBackground(a.id);
     if (moderation === "pending") {
       for (const ad of all("SELECT id FROM users WHERE role = 'admin'")) notify(ad.id, "moderation", "Annonce à valider", a.title, "/admin");
       return res.json({ auction: auctionView(a, req.user.id), notified: 0, pending: true });
@@ -857,7 +872,7 @@ app.get(
       },
       orders: orders.map((o) => orderView(o, { role: "admin" })),
       sellers: all("SELECT id, name, shop_name, phone, city, verified, blocked, plan_until, created_at FROM users WHERE role = 'seller' ORDER BY verified, id DESC"),
-      pending: all("SELECT * FROM auctions WHERE moderation = 'pending' ORDER BY id").map((a) => auctionView(a)),
+      pending: all("SELECT * FROM auctions WHERE moderation = 'pending' ORDER BY id").map((a) => ({ ...auctionView(a), ai_review: a.ai_review ? JSON.parse(a.ai_review) : null })),
       flags: all(
         `SELECT f.*, u.name, a.title FROM fraud_flags f LEFT JOIN users u ON u.id = f.user_id LEFT JOIN auctions a ON a.id = f.auction_id
          WHERE f.resolved = 0 ORDER BY f.id DESC LIMIT 50`,
@@ -871,6 +886,7 @@ app.get(
         demo: DEMO,
         bots: DEMO && process.env.DEMO_BOTS !== "0",
         public_url: process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || null,
+        ai: aiStatus(),
       },
     });
   }),

@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Suspense, lazy, useEffect, type ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { BottomBar, Footer, Nav, Ticker, Toasts } from "./components/Shell";
+import { AIChat } from "./components/AIChat";
 import { track, useApp } from "./lib/store";
 import Home from "./pages/Home";
 
@@ -92,6 +93,7 @@ export function App() {
       </Suspense>
       {!bare && <Footer />}
       {!bare && <BottomBar />}
+      {!bare && <AIChat />}
     </>
   );
 }

@@ -68,6 +68,7 @@ type Meta = {
   relay_fee: number;
   deposit_amount: number;
   deposit_threshold: number;
+  ai?: boolean;
 };
 
 type Ctx = {

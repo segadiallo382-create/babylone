@@ -11,6 +11,7 @@ import { createPaymentCheckout } from "./payments.js";
 import { queuePayout, processPayout } from "./payouts.js";
 import { VAPID_PUBLIC, removeSubscription, saveSubscription } from "./push.js";
 import { sendWhatsAppText } from "./messaging.js";
+import { AI_ENABLED, whatsappReply } from "./ai.js";
 import { categoryOfWord, normalize, parseQuery, searchText, suggestCategory } from "./text.js";
 import {
   CATEGORIES,
@@ -233,7 +234,32 @@ export function handleBot(phoneRaw, textRaw) {
     const a = one("SELECT * FROM auctions WHERE id = ?", p.auctionId);
     return bid(p.auctionId, Math.max(p.amount, a ? nextMin(a) : p.amount));
   }
-  return "Je n'ai pas compris. " + menu;
+  // Message libre : l'assistant IA prend le relais s'il est configuré
+  return AI_ENABLED ? null : "Je n'ai pas compris. " + menu;
+}
+
+// Offre proposée par l'assistant IA : mise en attente, l'utilisateur confirme avec OUI
+function proposeBid(phone, auctionId, amount) {
+  const a = one("SELECT * FROM auctions WHERE id = ? AND moderation = 'approved'", auctionId);
+  if (!a) return { error: "Vente introuvable." };
+  if (a.status !== "live") return { error: "Cette vente est terminée." };
+  const min = nextMin(a);
+  if (!(amount >= min)) return { error: `Offre trop basse : minimum ${fcfa(min)}.` };
+  pending.set(phone, { auctionId: a.id, amount: Math.round(amount), at: Date.now() });
+  return { ok: true, waiting_for: "OUI", auction_id: a.id, amount: Math.round(amount) };
+}
+
+export async function botReply(phoneRaw, text) {
+  const phone = String(phoneRaw).replace(/\D/g, "").replace(/^221/, "");
+  const reply = handleBot(phone, text);
+  if (reply !== null) return reply;
+  const user = one("SELECT * FROM users WHERE phone = ? AND deleted = 0", phone);
+  try {
+    return await whatsappReply(phone, text, user, (id, amount) => proposeBid(phone, id, amount));
+  } catch (e) {
+    console.error("Bot IA", e.message);
+    return "Je n'ai pas compris. Envoie AIDE pour voir les commandes.";
+  }
 }
 
 export function registerV3(app, h) {
@@ -908,7 +934,7 @@ export function registerV3(app, h) {
   app.post(
     "/api/admin/bot",
     requireRole("admin"),
-    wrap((req, res) => res.json({ reply: handleBot(String(req.body.phone || req.user.phone), String(req.body.text || "")) })),
+    wrap(async (req, res) => res.json({ reply: await botReply(String(req.body.phone || req.user.phone), String(req.body.text || "")) })),
   );
 
   // ---------- Webhook WhatsApp (messages entrants du bot) ----------
@@ -930,9 +956,10 @@ export function registerV3(app, h) {
       for (const ch of entry.changes || [])
         for (const m of ch.value?.messages || []) {
           const text = m.text?.body || m.button?.text || m.interactive?.button_reply?.title || "";
-          const reply = handleBot(m.from, text);
           const u = one("SELECT id FROM users WHERE phone = ?", String(m.from).replace(/^221/, ""));
-          sendWhatsAppText(m.from, reply, u?.id ?? null).catch(() => {});
+          botReply(m.from, text)
+            .then((reply) => sendWhatsAppText(m.from, reply, u?.id ?? null))
+            .catch(() => {});
         }
   });
 

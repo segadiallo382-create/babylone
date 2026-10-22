@@ -1,7 +1,7 @@
 // Test de bout en bout du parcours d'une vente (serveur lancé sur :4000, base de démo).
 import { DatabaseSync } from "node:sqlite";
 const B = process.env.API || "http://localhost:4000/api";
-const db = new DatabaseSync(new URL("../data/babylone.db", import.meta.url).pathname);
+const db = new DatabaseSync(process.env.BABYLONE_DATA ? `${process.env.BABYLONE_DATA}/babylone.db` : new URL("../data/babylone.db", import.meta.url).pathname);
 let fails = 0;
 const ok = (cond, msg) => { console.log(cond ? "  ✓" : "  ✗", msg); if (!cond) fails++; };
 async function call(path, token, body) {

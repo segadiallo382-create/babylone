@@ -357,6 +357,33 @@ function NewAuction({ onDone }: { onDone: () => void }) {
   const input = useRef<HTMLInputElement>(null);
   const set = (k: keyof typeof f) => (e: any) => setF({ ...f, [k]: e.target.value });
   const n = (s: string) => Number(s.replace(/\D/g, "")) || 0;
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiNote, setAiNote] = useState<{ price_note: string; warnings: string[] } | null>(null);
+
+  // L'IA rédige l'annonce à partir des photos ; le vendeur relit et corrige avant de publier
+  async function fillWithAI() {
+    setErr("");
+    setAiBusy(true);
+    try {
+      const { draft: d } = await post("/ai/listing", { images: thumbs.length === images.length ? thumbs : images, notes: f.title || f.description });
+      setF((x) => ({
+        ...x,
+        title: d.title,
+        description: d.description,
+        category: d.category,
+        condition: d.condition,
+        size: d.size || x.size,
+        start_price: d.start_price ? String(d.start_price) : x.start_price,
+        reserve_price: d.reserve_price ? String(d.reserve_price) : "",
+        buy_now_price: x.mode === "lot" && d.buy_now_price ? String(d.buy_now_price) : "",
+      }));
+      setAiNote({ price_note: d.price_note, warnings: d.warnings });
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setAiBusy(false);
+    }
+  }
 
   async function addFiles(files: FileList | null) {
     if (!files) return;
@@ -470,6 +497,23 @@ function NewAuction({ onDone }: { onDone: () => void }) {
                 </button>
               </motion.div>
             ))}
+          </div>
+        )}
+        {meta?.ai && images.length > 0 && (
+          <div className="stack" style={{ gap: 8 }}>
+            <button type="button" className="btn btn-ghost" onClick={fillWithAI} disabled={aiBusy}>
+              {aiBusy ? "L'IA regarde tes photos…" : "✨ Remplir l'annonce avec l'IA"}
+            </button>
+            {aiNote && (
+              <div className="muted" style={{ fontSize: 13 }}>
+                {aiNote.price_note} Relis tout avant de publier.
+                {aiNote.warnings.map((w) => (
+                  <div key={w} className="red">
+                    ⚠️ {w}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
         <div className="role-pick">

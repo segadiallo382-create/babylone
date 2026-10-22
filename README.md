@@ -152,6 +152,10 @@ Les intégrations PayDunya (encaissement et déboursement), Orange SMS et WhatsA
 | `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET` | Webhook du bot WhatsApp (vérification Meta, signature des messages) |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | Notifications push. Sans ces variables, les clés sont générées dans `data/`, mais avec l'offre gratuite de Render elles changent à chaque redéploiement et les abonnements push sont perdus. |
 | `DEPOSIT_AMOUNT`, `DEPOSIT_THRESHOLD` | Montant de la caution et seuil d'enchère où elle est exigée |
+| `ANTHROPIC_API_KEY` | Active l'IA (Claude) : assistant acheteur, annonce rédigée depuis les photos, modération automatique, réponses libres du bot WhatsApp. Sans cette clé, tout fonctionne comme avant. |
+| `AI_MODEL` | Modèle Claude, `claude-opus-5-5` par défaut |
+| `AI_MODERATION` | `hold` (défaut) : une annonce jugée interdite repasse en attente de validation. `flag` : simple signal dans l'onglet Fraude. |
+| `AI_DAILY_LIMIT` | Nombre maximum d'appels IA par jour (2 000 par défaut), pour plafonner la facture |
 
 Dès qu'une clé de paiement est définie, le mode démo se coupe. Les intégrations PayDunya, Wave, Orange SMS et WhatsApp suivent la documentation des fournisseurs, mais elles n'ont pas été testées avec de vraies clés : il faudra les tester en bac à sable.
 

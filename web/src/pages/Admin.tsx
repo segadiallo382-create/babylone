@@ -10,10 +10,10 @@ type Data = {
   kpis: { users: number; sellers: number; live: number; gmv: number; commissions: number; pros: number; escrow: number; disputes: number };
   orders: Order[];
   sellers: { id: number; name: string; shop_name: string; phone: string; city: string; verified: number; blocked: number; plan_until: number | null }[];
-  pending: Auction[];
+  pending: (Auction & { ai_review: { verdict: string; summary: string; reasons: string[] } | null })[];
   flags: { id: number; kind: string; detail: string; name: string; title: string; auction_id: number; user_id: number; created_at: number }[];
   outbox: { id: number; channel: string; recipient: string; body: string; status: string; error: string | null; created_at: number }[];
-  integrations: { paydunya: "live" | "test" | null; wave: boolean; sms: boolean; whatsapp: boolean; demo: boolean; bots: boolean; public_url: string | null };
+  integrations: { paydunya: "live" | "test" | null; wave: boolean; sms: boolean; whatsapp: boolean; demo: boolean; bots: boolean; public_url: string | null; ai: { enabled: boolean; model: string | null; moderation: string; calls_today: number; daily_limit: number } };
 };
 type Tab = "orders" | "moderation" | "sellers" | "fraud" | "outbox" | "integrations" | "analytics" | "payouts" | "audit" | "backups";
 
@@ -114,6 +114,14 @@ export default function Admin() {
                       {a.seller.name} · {a.city} · départ {money(a.start_price)} F · {a.category}
                     </div>
                     <div className="muted" style={{ fontSize: 13, maxWidth: 520 }}>{a.description}</div>
+                    {a.ai_review && (
+                      <div style={{ fontSize: 13, marginTop: 6, maxWidth: 520 }}>
+                        <span className={`chip ${a.ai_review.verdict === "ok" ? "chip-ok" : "chip-red"}`}>
+                          IA : {a.ai_review.verdict === "ok" ? "rien à signaler" : a.ai_review.verdict === "forbidden" ? "interdit ?" : "à vérifier"}
+                        </span>{" "}
+                        {a.ai_review.verdict !== "ok" && a.ai_review.summary}
+                      </div>
+                    )}
                   </span>
                 </span>
                 <span className="row">
@@ -142,7 +150,7 @@ export default function Admin() {
             {d.flags.map((f) => (
               <div key={f.id} className="card pad row between wrap" style={{ gap: 12 }}>
                 <span>
-                  <span className="chip chip-red">{f.kind === "shill_ip" ? "Même IP que le vendeur" : "Comptes jumeaux"}</span>
+                  <span className="chip chip-red">{f.kind === "shill_ip" ? "Même IP que le vendeur" : f.kind === "ai_forbidden" ? "IA : produit interdit ?" : f.kind === "ai_to_check" ? "IA : annonce à vérifier" : "Comptes jumeaux"}</span>
                   <p style={{ marginTop: 8 }}>{f.detail}</p>
                   <p className="muted" style={{ fontSize: 13 }}>
                     {f.name} · <Link to={`/enchere/${f.auction_id}`} className="red">{f.title}</Link> · {ago(f.created_at)}
@@ -310,6 +318,13 @@ function Integrations({ i, reload }: { i: Data["integrations"]; reload: () => vo
     ["Paiements PayDunya", "PAYDUNYA_MASTER_KEY, PAYDUNYA_PRIVATE_KEY, PAYDUNYA_TOKEN", !!i.paydunya, i.paydunya ? `Mode ${i.paydunya === "live" ? "réel" : "test (sandbox)"}` : "Non configuré", "payment"],
     ["SMS Orange", "ORANGE_CLIENT_ID, ORANGE_CLIENT_SECRET, ORANGE_SMS_SENDER", i.sms, i.sms ? "Branché" : "Simulé (code affiché à l'écran)", "sms"],
     ["WhatsApp Cloud", "WHATSAPP_TOKEN, WHATSAPP_PHONE_ID, WHATSAPP_TEMPLATE", i.whatsapp, i.whatsapp ? "Branché" : "Simulé (journal Messages)", "whatsapp"],
+    [
+      "Assistant IA (Claude)",
+      "ANTHROPIC_API_KEY, AI_MODEL, AI_MODERATION, AI_DAILY_LIMIT",
+      i.ai.enabled,
+      i.ai.enabled ? `${i.ai.model} · ${i.ai.calls_today}/${i.ai.daily_limit} appels aujourd'hui` : "Non configuré",
+      null,
+    ],
     ["Mode démo", "DEMO_MODE, DEMO_BOTS", !i.demo, i.demo ? `Actif${i.bots ? ", acheteurs fictifs en marche" : ""}` : "Coupé", null],
     ["Adresse publique", "PUBLIC_URL", !!i.public_url, i.public_url || "Non définie", null],
   ];
