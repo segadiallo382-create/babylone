@@ -1,0 +1,19 @@
+# Déploiement Render (Blueprint) : https://render.com/deploy
+services:
+  - type: web
+    name: babylone
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm run render-start
+    healthCheckPath: /api/meta
+    envVars:
+      - key: NODE_VERSION
+        value: "22.19.0"
+      - key: BABYLONE_SECRET
+        generateValue: true
+      - key: ADMIN_PASSWORD
+        generateValue: true
+      - key: DEMO_BOTS
+        value: "1"

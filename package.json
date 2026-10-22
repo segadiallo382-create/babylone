@@ -1,0 +1,37 @@
+{
+  "name": "babylone",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --no-warnings server/index.js & vite --config web/vite.config.ts",
+    "server": "node --no-warnings server/index.js",
+    "web": "vite --config web/vite.config.ts",
+    "build": "tsc -p web && vite build --config web/vite.config.ts",
+    "start": "NODE_ENV=production node --no-warnings server/index.js",
+    "seed": "node --no-warnings server/seed.js",
+    "render-start": "node --no-warnings server/bootstrap.js && NODE_ENV=production node --no-warnings server/index.js"
+  },
+  "dependencies": {
+    "@react-three/fiber": "8.17.10",
+    "express": "4.21.1",
+    "framer-motion": "11.11.17",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-router-dom": "6.28.0",
+    "socket.io": "4.8.1",
+    "socket.io-client": "4.8.1",
+    "three": "0.169.0"
+  },
+  "devDependencies": {
+    "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1",
+    "@types/three": "0.169.0",
+    "@vitejs/plugin-react": "4.3.3",
+    "typescript": "5.6.3",
+    "vite": "5.4.11"
+  },
+  "engines": {
+    "node": ">=22.13"
+  }
+}
