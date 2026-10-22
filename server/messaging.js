@@ -7,6 +7,8 @@ export const SMS_ENABLED = !!(process.env.ORANGE_CLIENT_ID && process.env.ORANGE
 export const WA_ENABLED = !!(process.env.WHATSAPP_TOKEN && process.env.WHATSAPP_PHONE_ID);
 // Modèle WhatsApp « utilitaire » à faire approuver par Meta : {{1}} titre, {{2}} message, {{3}} lien
 const WA_TEMPLATE = process.env.WHATSAPP_TEMPLATE || "babylone_notification";
+// Version de l'API Graph de Meta (les anciennes versions sont retirées au bout de 2 ans environ)
+const WA_API = `https://graph.facebook.com/${process.env.WHATSAPP_API_VERSION || "v23.0"}`;
 
 const intl = (phone) => `221${String(phone).replace(/\D/g, "").replace(/^221/, "")}`;
 
@@ -74,7 +76,7 @@ export async function sendWhatsAppText(phone, text, userId = null) {
   const to = intl(phone);
   if (!WA_ENABLED) return log(userId, "whatsapp", to, null, text, "simulated");
   try {
-    const res = await fetch(`https://graph.facebook.com/v20.0/${process.env.WHATSAPP_PHONE_ID}/messages`, {
+    const res = await fetch(`${WA_API}/${process.env.WHATSAPP_PHONE_ID}/messages`, {
       method: "POST",
       headers: { Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`, "Content-Type": "application/json" },
       body: JSON.stringify({ messaging_product: "whatsapp", to, type: "text", text: { body: text.slice(0, 4000) } }),
@@ -93,7 +95,7 @@ export async function sendWhatsApp(user, title, body, link) {
   const text = `${title} — ${body} ${url}`;
   if (!WA_ENABLED) return log(user.id, "whatsapp", to, WA_TEMPLATE, text, "simulated");
   try {
-    const res = await fetch(`https://graph.facebook.com/v20.0/${process.env.WHATSAPP_PHONE_ID}/messages`, {
+    const res = await fetch(`${WA_API}/${process.env.WHATSAPP_PHONE_ID}/messages`, {
       method: "POST",
       headers: { Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`, "Content-Type": "application/json" },
       body: JSON.stringify({

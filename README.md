@@ -149,6 +149,7 @@ Les intégrations PayDunya (encaissement et déboursement), Orange SMS et WhatsA
 | `ORANGE_CLIENT_ID`, `ORANGE_CLIENT_SECRET`, `ORANGE_SMS_SENDER`, `ORANGE_SMS_NAME` | SMS via l'API Orange |
 | `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_ID`, `WHATSAPP_TEMPLATE` | WhatsApp Cloud API. Modèle « utilitaire » à 3 variables : titre, message, lien. |
 | `DEMO_BOTS=0` | Coupe les acheteurs fictifs (obligatoire en production) |
+| `WHATSAPP_API_VERSION` | Version de l'API Graph de Meta, `v23.0` par défaut |
 | `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET` | Webhook du bot WhatsApp (vérification Meta, signature des messages) |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | Notifications push. Sans ces variables, les clés sont générées dans `data/`, mais avec l'offre gratuite de Render elles changent à chaque redéploiement et les abonnements push sont perdus. |
 | `DEPOSIT_AMOUNT`, `DEPOSIT_THRESHOLD` | Montant de la caution et seuil d'enchère où elle est exigée |
