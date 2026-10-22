@@ -64,6 +64,12 @@ export function publicUser(u) {
     whatsapp: !!u.whatsapp,
     phone_verified: !!u.phone_verified,
     referral_code: u.referral_code,
+    points: u.points || 0,
+    deposit: u.deposit || 0,
+    lang: u.lang || "fr",
+    bio: u.bio || "",
+    payout_method: u.payout_method || null,
+    payout_account: u.payout_account || null,
   };
 }
 

@@ -6,6 +6,18 @@ export const ANTI_SNIPE_MS = 2 * 60 * 1000; // une offre dans les 2 dernières m
 export const PAY_DELAY_MS = Number(process.env.PAY_DELAY_MS || 24 * 3600 * 1000);
 export const AUTO_RELEASE_MS = 72 * 3600 * 1000; // fonds libérés 72 h après livraison sans litige
 export const MAX_STRIKES = 2;
+export const DEPOSIT_AMOUNT = Number(process.env.DEPOSIT_AMOUNT || 5_000); // caution remboursable
+export const DEPOSIT_THRESHOLD = Number(process.env.DEPOSIT_THRESHOLD || 100_000); // offre à partir de laquelle la caution est exigée
+export const RELAY_FEE = 1_000;
+export const SIZES = ["XS", "S", "M", "L", "XL", "XXL", ...Array.from({ length: 14 }, (_, i) => String(34 + i))];
+export const POINTS_PER_FCFA = 1 / 1000; // 1 point pour 1 000 F payés
+export const REFERRAL_POINTS = 500;
+export const LEVELS = [
+  [0, "Bronze"],
+  [100, "Argent"],
+  [500, "Or"],
+  [2000, "Platine"],
+];
 
 // Marge d'évolution du prix fixée par la plateforme selon le prix courant
 const STEPS = [

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { CountUp, Reveal, Segmented } from "../components/ui";
-import { api, post, type Auction, type Order } from "../lib/api";
+import { api, download, post, type Auction, type Order } from "../lib/api";
+import { Analytics, Audit, Backups, BotSim, Payouts } from "./AdminPlus";
 import { ORDER_STATUS, ago, fcfa, money } from "../lib/format";
 import { useApp } from "../lib/store";
 
@@ -14,7 +15,7 @@ type Data = {
   outbox: { id: number; channel: string; recipient: string; body: string; status: string; error: string | null; created_at: number }[];
   integrations: { paydunya: "live" | "test" | null; wave: boolean; sms: boolean; whatsapp: boolean; demo: boolean; bots: boolean; public_url: string | null };
 };
-type Tab = "orders" | "moderation" | "sellers" | "fraud" | "outbox" | "integrations";
+type Tab = "orders" | "moderation" | "sellers" | "fraud" | "outbox" | "integrations" | "analytics" | "payouts" | "audit" | "backups";
 
 export default function Admin() {
   const [d, setD] = useState<Data | null>(null);
@@ -63,23 +64,43 @@ export default function Admin() {
             </Reveal>
           ))}
         </div>
-        <div style={{ margin: "30px 0 18px" }}>
+        <div className="row" style={{ justifyContent: "end", marginTop: 16 }}>
+          <button className="btn btn-ghost btn-sm" onClick={() => download("/admin/export.csv", "babylone-commandes.csv").catch((e) => toast(e.message))}>
+            Export comptable (CSV)
+          </button>
+        </div>
+        <div style={{ margin: "14px 0 18px" }}>
           <Segmented
             id="admin"
             value={tab}
             onChange={setTab}
             options={[
+              ["analytics", "Audience"],
               ["orders", "Commandes"],
+              ["payouts", "Versements"],
               ["moderation", `Modération · ${d.pending.length}`],
               ["sellers", "Vendeurs"],
               ["fraud", `Fraude · ${d.flags.length}`],
               ["outbox", "Messages"],
               ["integrations", "Intégrations"],
+              ["audit", "Audit"],
+              ["backups", "Sauvegardes"],
             ]}
           />
         </div>
-        {tab === "integrations" ? (
-          <Integrations i={d.integrations} reload={load} />
+        {tab === "analytics" ? (
+          <Analytics />
+        ) : tab === "payouts" ? (
+          <Payouts />
+        ) : tab === "audit" ? (
+          <Audit />
+        ) : tab === "backups" ? (
+          <Backups />
+        ) : tab === "integrations" ? (
+          <div className="stack">
+            <Integrations i={d.integrations} reload={load} />
+            <BotSim />
+          </div>
         ) : tab === "moderation" ? (
           <div className="stack">
             {d.pending.length === 0 && <div className="empty card">Aucune annonce en attente.</div>}
@@ -96,6 +117,9 @@ export default function Admin() {
                   </span>
                 </span>
                 <span className="row">
+                  <button className="btn btn-ghost btn-sm" onClick={() => act(`/admin/inspect/${a.id}`, "Badge « Inspecté » modifié")}>
+                    {a.inspected ? "Retirer « Inspecté »" : "Marquer inspecté"}
+                  </button>
                   <button className="btn btn-red btn-sm" onClick={() => act(`/admin/auctions/${a.id}/approve`, "Annonce publiée")}>
                     Valider
                   </button>
@@ -180,7 +204,11 @@ export default function Admin() {
                   const [label, kind] = ORDER_STATUS[o.status];
                   return (
                     <tr key={o.id}>
-                      <td className="num">{o.id}</td>
+                      <td className="num">
+                        <Link to={`/compte/commandes/${o.id}`} className="red">
+                          {o.id}
+                        </Link>
+                      </td>
                       <td>
                         <Link to={`/enchere/${o.auction.id}`} className="prod-cell">
                           <img src={o.auction.image} alt="" />

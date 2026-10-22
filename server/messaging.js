@@ -69,6 +69,23 @@ export async function sendSMS(phone, text, userId = null) {
   }
 }
 
+// Réponse libre du bot (autorisée par Meta dans les 24 h qui suivent un message de l'utilisateur)
+export async function sendWhatsAppText(phone, text, userId = null) {
+  const to = intl(phone);
+  if (!WA_ENABLED) return log(userId, "whatsapp", to, null, text, "simulated");
+  try {
+    const res = await fetch(`https://graph.facebook.com/v20.0/${process.env.WHATSAPP_PHONE_ID}/messages`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ messaging_product: "whatsapp", to, type: "text", text: { body: text.slice(0, 4000) } }),
+    });
+    if (!res.ok) throw new Error(`WhatsApp ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    log(userId, "whatsapp", to, null, text, "sent");
+  } catch (e) {
+    log(userId, "whatsapp", to, null, text, "failed", e.message);
+  }
+}
+
 export async function sendWhatsApp(user, title, body, link) {
   if (!user?.whatsapp) return;
   const to = intl(user.phone);

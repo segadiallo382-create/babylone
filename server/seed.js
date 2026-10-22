@@ -40,12 +40,28 @@ function user(phone, name, role, city, shop = null, extra = {}, password = PASSW
 tx(() => {
   user("770000000", "Admin Babylone", "admin", "Thiès", null, {}, process.env.ADMIN_PASSWORD);
   const sellerIds = SELLERS.map((s, i) => user(s.phone, s.name, "seller", s.city, s.shop, { verified: i !== 5, pro: i % 3 === 0 }));
+  // Comptes de versement (sauf la boutique non vérifiée, pour montrer le rappel)
+  sellerIds.forEach((id, i) => i !== 5 && run("UPDATE users SET payout_method = ?, payout_account = ? WHERE id = ?", i % 2 ? "orange_money" : "wave", SELLERS[i].phone, id));
   const buyerIds = BUYERS.map(([name, city], i) => user(`78100${String(i).padStart(4, "0")}`, name, "buyer", city));
+  for (const id of buyerIds) run("UPDATE users SET deposit = 5000, points = ? WHERE id = ?", Math.floor(rnd() * 900), id);
   const demoBuyer = user("781234567", "Mouhamed Dial", "buyer", "Thiès");
 
   // Durées variées : certaines ventes se terminent dans quelques minutes
   const ends = [0.12, 0.3, 0.6, 1.5, 2, 3, 5, 8, 12, 20, 26, 30, 36, 44, 50, 60, 70, 4, 9, 16, 22, 40, 0.9];
   // Ventes multiples (1 pièce par gagnant) et achats immédiats de démonstration
+  const SIZE = {
+    "sneaker-noir": "42",
+    "sneaker-bordeaux": "41",
+    "running-rouge": "43",
+    escarpins: "39",
+    "sneaker-montante": "42",
+    "derby-vert": "41",
+    "sneaker-pastel": "38",
+    "training-vert": "44",
+    "veste-cuir": "M",
+    bomber: "L",
+    "tshirt-noir": "L",
+  };
   const EXTRA = {
     "tshirt-noir": { mode: "multi", qty: 10, title: "T-shirts coton noir · 10 pièces, 10 gagnants", start: 2500, reserve: 0 },
     "casque-gris": { mode: "multi", qty: 6, title: "Casque filaire studio · 6 pièces, 6 gagnants", start: 2000, reserve: 0 },
@@ -86,6 +102,7 @@ tx(() => {
       x.buy || 0,
     );
     const aid = Number(r.lastInsertRowid);
+    run("UPDATE auctions SET size = ?, inspected = ?, flash = ? WHERE id = ?", SIZE[img] || null, img === "laptop" || img === "smartphone" ? 1 : 0, img === "lunettes-rondes" ? 1 : 0, aid);
     if (x.mode === "multi") {
       // Chaque acheteur propose une fois ; le prix affiché est l'offre la plus basse parmi les gagnants
       const n = 4 + Math.floor(rnd() * 8);
@@ -246,6 +263,44 @@ tx(() => {
     for (const v of new Set([uid, ...voters])) run("INSERT OR IGNORE INTO request_votes (user_id, request_id) VALUES (?,?)", v, r.lastInsertRowid);
     run("UPDATE requests SET votes = (SELECT COUNT(*) FROM request_votes WHERE request_id = ?) WHERE id = ?", r.lastInsertRowid, r.lastInsertRowid);
   });
+});
+
+// Arrivages en précommande et live de démonstration
+tx(() => {
+  const ndiaye = one("SELECT id FROM users WHERE phone = '771000001'").id;
+  const gueye = one("SELECT id FROM users WHERE phone = '771000007'").id;
+  const buyers = [1, 2, 3, 4, 5, 6].map((i) => one("SELECT id FROM users WHERE phone = ?", `78100${String(i).padStart(4, "0")}`).id);
+  const D = 24 * H;
+  const pre = [
+    [ndiaye, "Conteneur Chine : baskets running, 300 paires", "Chaussures", "/products/sneaker-noir.jpg", "Thiès", 7500, 20, 300, 120, 3 * D, 12 * D, "Arrivage prévu au port de Dakar. Pointures 39 à 45. Prix public habituel : 15 000 F."],
+    [gueye, "Ballots de friperie premier choix (Europe), 80 ballots", "Friperie", "/products/veste-cuir.jpg", "Mbour", 65000, 30, 80, 30, 5 * D, 20 * D, "Ballots de 45 kg, vestes et pulls. Idéal revendeurs."],
+    [ndiaye, "Smartphones Android 64 Go, 150 pièces", "Électronique", "/products/smartphone.jpg", "Thiès", 42000, 15, 150, 60, 6 * D, 18 * D, "Neufs, sous blister, garantie importateur 6 mois."],
+  ];
+  pre.forEach(([seller, title, cat, img, city, unit, pct, total, min, deadline, eta, desc], i) => {
+    const r = run(
+      `INSERT INTO preorders (seller_id, title, description, category, images, city, unit_price, deposit_pct, total_units, min_units, eta, deadline, created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      seller, title, desc, cat, JSON.stringify([img]), city, unit, pct, total, min, now + eta, now + deadline, now - D,
+    );
+    buyers.slice(0, 3 + i).forEach((b, k) => {
+      const qty = [10, 4, 25, 2, 8, 6, 3][k % 7];
+      run("INSERT INTO reservations (preorder_id, user_id, qty, deposit, status, created_at) VALUES (?,?,?,?, 'reserved', ?)", r.lastInsertRowid, b, qty, Math.ceil((unit * qty * pct) / 100), now - k * H);
+    });
+  });
+  // Live de Gueye Sneakers avec ses ventes de chaussures
+  const lots = all("SELECT id FROM auctions WHERE seller_id = ? AND status = 'live' AND moderation = 'approved' ORDER BY ends_at DESC", gueye).map((a) => a.id);
+  if (lots.length) {
+    const lv = run(
+      "INSERT INTO lives (seller_id, title, stream_url, starts_at, status, current_auction, created_at) VALUES (?,?,?,?, 'live', ?, ?)",
+      gueye, "Vendredi sneakers : arrivage frais, départs à petit prix", null, now - 10 * 60 * 1000, lots[0], now,
+    );
+    for (const id of lots) run("UPDATE auctions SET live_id = ? WHERE id = ?", lv.lastInsertRowid, id);
+  }
+  run("INSERT INTO lives (seller_id, title, stream_url, starts_at, status, created_at) VALUES (?,?,?,?, 'scheduled', ?)", ndiaye, "Déballage du conteneur : électronique et accessoires", null, now + 2 * D, now);
+  run(
+    "INSERT INTO follows (user_id, seller_id, created_at) VALUES (?,?,?)",
+    one("SELECT id FROM users WHERE phone = '781234567'").id, gueye, now,
+  );
 });
 
 console.log("Base de démo prête.", one("SELECT COUNT(*) n FROM auctions WHERE status='live'").n, "ventes en direct.");

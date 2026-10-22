@@ -3,19 +3,31 @@ import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { ago, initials, money } from "../lib/format";
 import { liteMode, setLiteMode } from "../lib/perf";
+import { setLang, useLang, useT } from "../lib/i18n";
 import { useApp, useFeed } from "../lib/store";
 import { IBell, ICheck, IClose, IGavel, IGrid, IHome, ILogout, IMegaphone, IMenu, IStore, IUser } from "./Icons";
 import { Logo } from "./ui";
 
 const LINKS: [string, string][] = [
   ["/encheres", "Enchères"],
-  ["/carte", "Carte live"],
+  ["/live", "Live"],
+  ["/arrivages", "Arrivages"],
   ["/demandes", "Demandes"],
   ["/vendre", "Vendre"],
 ];
 
+function LangSwitch() {
+  const lang = useLang();
+  return (
+    <button className="chip hide-m" onClick={() => setLang(lang === "fr" ? "wo" : "fr")} title="Français / Wolof">
+      {lang === "fr" ? "FR" : "WO"}
+    </button>
+  );
+}
+
 export function Nav() {
   const { user, unread } = useApp();
+  const t = useT();
   const loc = useLocation();
   const [open, setOpen] = useState(false);
   useEffect(() => setOpen(false), [loc.pathname]);
@@ -33,13 +45,15 @@ export function Nav() {
                 {({ isActive }) => (
                   <>
                     {isActive && <motion.span layoutId="nav-pill" className="nav-pill" transition={{ type: "spring", stiffness: 380, damping: 30 }} />}
-                    {label}
+                    {label === "Live" && <span className="live-dot" style={{ display: "inline-block", marginRight: 6, verticalAlign: "middle" }} />}
+                    {t(label)}
                   </>
                 )}
               </NavLink>
             ))}
           </nav>
           <div className="nav-right">
+            <LangSwitch />
             {user ? (
               <>
                 <Bell />
@@ -48,10 +62,10 @@ export function Nav() {
             ) : (
               <>
                 <Link to="/connexion" className="btn btn-ghost btn-sm hide-m">
-                  Connexion
+                  {t("Connexion")}
                 </Link>
                 <Link to="/inscription" className="btn btn-red btn-sm">
-                  Créer un compte
+                  {t("Créer un compte")}
                 </Link>
               </>
             )}
@@ -68,7 +82,7 @@ export function Nav() {
             <button className="icon-btn" style={{ position: "absolute", top: 12, right: 16 }} onClick={() => setOpen(false)} aria-label="Fermer">
               <IClose />
             </button>
-            {[["/", "Accueil"], ...LINKS, ...(user ? [[user.role === "seller" ? "/vendeur" : user.role === "admin" ? "/admin" : "/compte", "Mon espace"]] : [["/connexion", "Connexion"]])].map(
+            {[["/", "Accueil"], ...LINKS, ["/carte", "Carte live"], ...(user ? [[user.role === "seller" ? "/vendeur" : user.role === "admin" ? "/admin" : "/compte", "Mon espace"]] : [["/connexion", "Connexion"]])].map(
               ([to, label], i) => (
                 <motion.div
                   key={to}
@@ -77,7 +91,7 @@ export function Nav() {
                   transition={{ delay: 0.05 * i, duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
                   style={{ transformPerspective: 800 }}
                 >
-                  <Link to={to}>{label}</Link>
+                  <Link to={to}>{t(label)}</Link>
                 </motion.div>
               ),
             )}
@@ -266,10 +280,11 @@ export function Toasts() {
 export function BottomBar() {
   const { user, unread } = useApp();
   const space = user?.role === "seller" ? "/vendeur" : user?.role === "admin" ? "/admin" : user ? "/compte" : "/connexion";
+  const t = useT();
   const items: [string, string, any][] = [
     ["/", "Accueil", IHome],
     ["/encheres", "Enchères", IGavel],
-    ["/demandes", "Demandes", IMegaphone],
+    ["/live", "Live", IMegaphone],
     [space, "Compte", IUser],
   ];
   return (
@@ -277,7 +292,7 @@ export function BottomBar() {
       {items.map(([to, label, Icon]) => (
         <NavLink key={label} to={to} end={to === "/"} className={({ isActive }) => (isActive ? "active" : "")} style={{ position: "relative" }}>
           <Icon size={21} />
-          {label}
+          {t(label)}
           {label === "Compte" && !!unread && <span className="badge-count" style={{ right: 4 }}>{unread}</span>}
         </NavLink>
       ))}
@@ -299,6 +314,8 @@ export function Footer() {
           <div>
             <h4>Acheter</h4>
             <Link to="/encheres">Toutes les ventes</Link>
+            <Link to="/live">Ventes en live</Link>
+            <Link to="/arrivages">Arrivages en précommande</Link>
             <Link to="/carte">Carte en direct</Link>
             <Link to="/demandes">Espace demande</Link>
           </div>

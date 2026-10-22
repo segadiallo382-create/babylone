@@ -2,7 +2,9 @@
 // anti-snipe, clôture, délais et rappels de paiement, libération des fonds, signaux de fraude.
 import { all, one, run, tx } from "./db.js";
 import { sendWhatsApp } from "./messaging.js";
-import { ANTI_SNIPE_MS, AUTO_RELEASE_MS, COMMISSION_RATE, MAX_STRIKES, PAY_DELAY_MS, deliveryFee, increment } from "./rules.js";
+import { queuePayout, retryPayouts, setPayoutNotifier } from "./payouts.js";
+import { pushTo } from "./push.js";
+import { ANTI_SNIPE_MS, AUTO_RELEASE_MS, COMMISSION_RATE, DEPOSIT_AMOUNT, DEPOSIT_THRESHOLD, MAX_STRIKES, PAY_DELAY_MS, deliveryFee, increment } from "./rules.js";
 
 let io = null;
 export const setIO = (s) => (io = s);
@@ -32,7 +34,10 @@ export function notify(userId, type, title, body = "", link = null) {
     const u = one("SELECT id, phone, whatsapp FROM users WHERE id = ?", userId);
     sendWhatsApp(u, title, body, link).catch(() => {});
   }
+  if (WA_TYPES.has(type) || PUSH_TYPES.has(type)) pushTo(userId, { title, body, link: link || "/" }).catch(() => {});
 }
+setPayoutNotifier(notify);
+const PUSH_TYPES = new Set(["ending_soon", "follow_new", "search_match", "lost", "sold", "first_bid", "live"]);
 
 // Classement : meilleure offre de chaque enchérisseur, à égalité le plus ancien d'abord
 export function ranking(auctionId) {
@@ -72,6 +77,11 @@ export function auctionView(a, viewerId = null) {
     city: a.city,
     region: a.region,
     images: JSON.parse(a.images),
+    thumbs: a.thumbs ? JSON.parse(a.thumbs) : null,
+    size: a.size,
+    inspected: !!a.inspected,
+    flash: !!a.flash,
+    live_id: a.live_id,
     mode: a.mode,
     quantity: a.quantity,
     start_price: a.start_price,
@@ -178,7 +188,10 @@ export function placeBid(user, auctionId, amount, maxAuto = 0, ip = null) {
     if (a.status !== "live" || a.ends_at <= now) throw new BidError("Cette vente est terminée.");
     if (a.starts_at > now) throw new BidError("Cette vente n'a pas encore commencé.");
     if (a.seller_id === user.id) throw new BidError("Tu ne peux pas enchérir sur ta propre vente.");
-    if (user.blocked) throw new BidError("Compte suspendu. Contacte le support.");
+    if (user.blocked || user.deleted) throw new BidError("Compte suspendu. Contacte le support.");
+    // Caution exigée pour les grosses enchères : décourage les gagnants qui ne paient pas
+    if (Math.max(amount, maxAuto) >= DEPOSIT_THRESHOLD && (user.deposit || 0) < DEPOSIT_AMOUNT)
+      throw new BidError(`Caution requise : verse ${fcfa(DEPOSIT_AMOUNT)} (remboursables) pour enchérir à partir de ${fcfa(DEPOSIT_THRESHOLD)}.`);
     if (user.strikes >= MAX_STRIKES) throw new BidError("Compte suspendu : plusieurs ventes gagnées non payées.");
 
     // ---- Vente multiple : les N meilleures offres gagnent une pièce chacune ----
@@ -400,10 +413,13 @@ export function expirePayments() {
   const now = Date.now();
   for (const o of all("SELECT * FROM orders WHERE status = 'awaiting_payment' AND pay_deadline <= ?", now)) {
     const a = one("SELECT * FROM auctions WHERE id = ?", o.auction_id);
+    const forfeited = one("SELECT deposit FROM users WHERE id = ?", o.buyer_id)?.deposit || 0;
     tx(() => {
       run("UPDATE orders SET status = 'expired', updated_at = ? WHERE id = ?", now, o.id);
-      run("UPDATE users SET strikes = strikes + 1 WHERE id = ?", o.buyer_id);
+      run("UPDATE users SET strikes = strikes + 1, deposit = 0 WHERE id = ?", o.buyer_id);
     });
+    // Caution perdue : versée au vendeur en dédommagement
+    if (forfeited) queuePayout("seller_payout", o.seller_id, forfeited, o.id);
     notify(o.buyer_id, "expired", "Délai de paiement dépassé", `${a.title} est proposé à l'offrant suivant.`, `/enchere/${a.id}`);
     const tried = all("SELECT buyer_id FROM orders WHERE auction_id = ?", a.id).map((r) => r.buyer_id);
     const next = ranking(a.id).find((r) => !tried.includes(r.user_id));
@@ -437,7 +453,8 @@ export function releaseFunds(orderId) {
   if (!o || o.status !== "delivered") return false;
   run("UPDATE orders SET status = 'released', updated_at = ? WHERE id = ?", Date.now(), o.id);
   const a = one("SELECT title FROM auctions WHERE id = ?", o.auction_id);
-  notify(o.seller_id, "payout", "Paiement libéré", `${a.title} : ${fcfa(o.amount - o.commission)} versés sur ton compte.`, "/vendeur");
+  queuePayout("seller_payout", o.seller_id, o.amount - o.commission, o.id);
+  notify(o.seller_id, "payout", "Paiement libéré", `${a.title} : ${fcfa(o.amount - o.commission)} envoyés sur ton compte Wave ou Orange Money.`, "/vendeur");
   return true;
 }
 
@@ -446,12 +463,38 @@ export function autoRelease() {
   for (const o of all("SELECT id FROM orders WHERE status = 'delivered' AND updated_at <= ?", limit)) releaseFunds(o.id);
 }
 
+// « Se termine dans moins d'une heure » pour ceux qui suivent la vente sans être en tête
+export function remindEnding() {
+  const now = Date.now();
+  for (const a of all("SELECT id, title, leader_id, mode FROM auctions WHERE status = 'live' AND moderation = 'approved' AND ends_at BETWEEN ? AND ?", now, now + 3600_000)) {
+    const users = all(
+      `SELECT w.user_id FROM watches w WHERE w.auction_id = ? AND w.user_id != ? AND NOT EXISTS
+       (SELECT 1 FROM reminders r WHERE r.auction_id = w.auction_id AND r.user_id = w.user_id AND r.kind = 'ending')`,
+      a.id,
+      a.mode === "multi" ? -1 : a.leader_id ?? -1,
+    );
+    for (const u of users) {
+      run("INSERT OR IGNORE INTO reminders (auction_id, user_id, kind) VALUES (?,?, 'ending')", a.id, u.user_id);
+      notify(u.user_id, "ending_soon", "Dernière heure", `${a.title} se termine dans moins d'une heure.`, `/enchere/${a.id}`);
+    }
+  }
+}
+
+const extraTicks = [];
+export const onTick = (fn) => extraTicks.push(fn);
+let tickCount = 0;
+
 export function tick() {
   try {
     closeExpired();
     expirePayments();
     remindPayments();
     autoRelease();
+    if (++tickCount % 30 === 0) {
+      remindEnding();
+      retryPayouts();
+      for (const fn of extraTicks) fn();
+    }
   } catch (e) {
     console.error("[tick]", e);
   }

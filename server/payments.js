@@ -68,7 +68,12 @@ export function verifyPaydunyaHash(hash) {
 export async function confirmPaydunya(token) {
   const res = await fetch(`${PAYDUNYA_BASE}/checkout-invoice/confirm/${encodeURIComponent(token)}`, { headers: paydunyaHeaders() });
   const j = await res.json().catch(() => ({}));
-  return { completed: j.status === "completed", amount: Number(j.invoice?.total_amount || 0), orderId: Number(j.custom_data?.order_id || 0) };
+  return {
+    completed: j.status === "completed",
+    amount: Number(j.invoice?.total_amount || 0),
+    orderId: Number(j.custom_data?.order_id || 0),
+    paymentId: Number(j.custom_data?.payment_id || 0),
+  };
 }
 
 // Wave : en-tête "Wave-Signature: t=<timestamp>,v1=<hmac>" sur timestamp + corps brut
@@ -79,4 +84,25 @@ export function verifyWaveSignature(rawBody, header) {
   if (!parts.t || !parts.v1) return false;
   const expected = createHmac("sha256", secret).update(parts.t + rawBody).digest("hex");
   return expected.length === parts.v1.length && timingSafeEqual(Buffer.from(expected), Buffer.from(parts.v1));
+}
+
+// Paiements hors commande : caution, acompte d'arrivage, solde d'arrivage
+export async function createPaymentCheckout(payment, title, backPath) {
+  const back = `${PUBLIC_URL}${backPath}`;
+  if (PAYDUNYA_ENABLED) {
+    const res = await fetch(`${PAYDUNYA_BASE}/checkout-invoice/create`, {
+      method: "POST",
+      headers: paydunyaHeaders(),
+      body: JSON.stringify({
+        invoice: { total_amount: payment.amount, description: title },
+        store: { name: "Babylone", website_url: PUBLIC_URL },
+        actions: { cancel_url: `${back}?paiement=annule`, return_url: `${back}?paiement=ok`, callback_url: `${PUBLIC_URL}/api/webhooks/paydunya` },
+        custom_data: { payment_id: payment.id },
+      }),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (j.response_code !== "00") throw new Error(`PayDunya a refusé la demande (${j.response_text || res.status}).`);
+    return { redirect: j.response_text, ref: j.token, demo: false };
+  }
+  return { redirect: null, ref: `demo-pay-${payment.id}`, demo: true };
 }

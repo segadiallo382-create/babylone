@@ -2,7 +2,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Suspense, lazy, useEffect, type ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { BottomBar, Footer, Nav, Ticker, Toasts } from "./components/Shell";
-import { useApp } from "./lib/store";
+import { track, useApp } from "./lib/store";
 import Home from "./pages/Home";
 
 const Auctions = lazy(() => import("./pages/Auctions"));
@@ -17,6 +17,12 @@ const Sell = lazy(() => import("./pages/Sell"));
 const Seller = lazy(() => import("./pages/Seller"));
 const Admin = lazy(() => import("./pages/Admin"));
 const Legal = lazy(() => import("./pages/Legal"));
+const Boutique = lazy(() => import("./pages/Boutique"));
+const Invoice = lazy(() => import("./pages/Invoice"));
+const Arrivages = lazy(() => import("./pages/Arrivages"));
+const Arrivage = lazy(() => import("./pages/Arrivage"));
+const Lives = lazy(() => import("./pages/Lives"));
+const LiveRoom = lazy(() => import("./pages/LiveRoom"));
 
 function Page({ children }: { children: ReactNode }) {
   return (
@@ -45,6 +51,7 @@ export function App() {
   const loc = useLocation();
   const { meta } = useApp();
   useEffect(() => window.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior }), [loc.pathname]);
+  useEffect(() => track("visit"), []);
   const bare = loc.pathname.startsWith("/paiement");
 
   return (
@@ -60,6 +67,12 @@ export function App() {
             <Route path="/encheres" element={<Page><Auctions /></Page>} />
             <Route path="/enchere/:id" element={<Page><AuctionDetail /></Page>} />
             <Route path="/carte" element={<Page><LiveMap /></Page>} />
+            <Route path="/boutique/:id" element={<Page><Boutique /></Page>} />
+            <Route path="/arrivages" element={<Page><Arrivages /></Page>} />
+            <Route path="/arrivage/:id" element={<Page><Arrivage /></Page>} />
+            <Route path="/live" element={<Page><Lives /></Page>} />
+            <Route path="/live/:id" element={<Page><LiveRoom /></Page>} />
+            <Route path="/facture/:id" element={<Page><Guard><Invoice /></Guard></Page>} />
             <Route path="/demandes" element={<Page><Requests /></Page>} />
             <Route path="/connexion" element={<Page><Auth mode="login" /></Page>} />
             <Route path="/inscription" element={<Page><Auth mode="register" /></Page>} />

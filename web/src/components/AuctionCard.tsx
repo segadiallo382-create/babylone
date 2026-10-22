@@ -27,13 +27,15 @@ export function AuctionCard({ a }: { a: Auction }) {
     <Tilt max={9}>
       <Link to={`/enchere/${a.id}`} className={`a-card ${flash ? "flash" : ""}`}>
         <div className="media">
-          <img src={a.images[0]} alt={a.title} loading="lazy" />
+          <img src={a.thumbs?.[0] || a.images[0]} alt={a.title} loading="lazy" decoding="async" />
           <div className="tags">
             {!ended && (
               <span className="chip">
                 <span className="live-dot" /> En direct
               </span>
             )}
+            {a.flash && !ended && <span className="chip chip-red">⚡ Flash</span>}
+            {a.live_id && !ended && <span className="chip chip-red">● Live</span>}
             {a.boosted && (
               <span className="chip chip-red">
                 <IZap size={12} /> À la une
@@ -54,6 +56,16 @@ export function AuctionCard({ a }: { a: Auction }) {
           <div className="meta">
             <IPin size={13} /> {a.city} · {a.seller.name}
           </div>
+          {(a.size || a.inspected) && (
+            <div className="row" style={{ gap: 6, marginTop: 8 }}>
+              {a.size && <span className="chip" style={{ height: 22, fontSize: 11 }}>Taille {a.size}</span>}
+              {a.inspected && (
+                <span className="chip chip-ok" style={{ height: 22, fontSize: 11 }}>
+                  Inspecté
+                </span>
+              )}
+            </div>
+          )}
           <div className="price-row">
             <div>
               <div className="eyebrow" style={{ fontSize: 10.5, marginBottom: 2 }}>

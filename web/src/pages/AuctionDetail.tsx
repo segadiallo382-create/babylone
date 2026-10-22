@@ -1,9 +1,15 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { AuctionCard } from "../components/AuctionCard";
 import { IBox, ICheck, IEye, IHeart, IPin, IShield, IStore, ITruck, IZap } from "../components/Icons";
 import { ShareWhatsApp } from "../components/Share";
+import { MarketPrice, Poster } from "../components/AuctionExtras";
+import { can3D } from "../three/capability";
+import { serverNow, track } from "../lib/store";
+import { useT } from "../lib/i18n";
+
+const ProductViewer = lazy(() => import("../three/Scenes").then((m) => ({ default: m.ProductViewer })));
 import { Burst, Odometer, Reveal, RingTimer, Stars, Tilt } from "../components/ui";
 import { api, post, type Auction } from "../lib/api";
 import { ago, fcfa, money } from "../lib/format";
@@ -38,6 +44,9 @@ export default function AuctionDetail() {
   const [similar, setSimilar] = useState<Auction[]>([]);
   const [notFound, setNotFound] = useState(false);
   const [autoOn, setAutoOn] = useState(false);
+  const [view3d, setView3d] = useState(false);
+  const [following, setFollowing] = useState<boolean | null>(null);
+  const t = useT();
   const [autoMax, setAutoMax] = useState(0);
 
   const load = useCallback(() => {
@@ -48,6 +57,9 @@ export default function AuctionDetail() {
         setStep(r.increment);
         setMyOrder(r.my_order);
         setAmount((v) => Math.max(v, r.auction.next_min));
+        api(`/sellers/${r.auction.seller.id}`)
+          .then((x) => setFollowing(x.seller.following))
+          .catch(() => {});
         api(`/auctions?category=${encodeURIComponent(r.auction.category)}&limit=5`).then((s) =>
           setSimilar(s.auctions.filter((x: Auction) => x.id !== r.auction.id).slice(0, 4)),
         );
@@ -59,7 +71,9 @@ export default function AuctionDetail() {
     setA(null);
     setAmount(0);
     setImg(0);
+    setView3d(false);
     load();
+    track("view");
   }, [load]);
 
   useEffect(() => {
@@ -121,7 +135,7 @@ export default function AuctionDetail() {
       </div>
     );
 
-  const live = a.status === "live" && a.ends_at > Date.now();
+  const live = a.status === "live" && a.ends_at > serverNow();
   const mine = user?.id === a.seller.id;
   const multi = a.mode === "multi";
 
@@ -148,6 +162,25 @@ export default function AuctionDetail() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function payDeposit() {
+    try {
+      const r = await post("/me/deposit");
+      if (r.redirect) return void (window.location.href = r.redirect);
+      await post(`/payments/${r.payment_id}/demo-confirm`);
+      toast("Caution versée", "Tu peux enchérir sur les gros lots. Elle t'est rendue sur demande.", "ok");
+      setErr("");
+    } catch (e: any) {
+      setErr(e.message);
+    }
+  }
+
+  async function follow() {
+    if (!user) return nav(`/connexion?suite=/enchere/${id}`);
+    const r = await post(`/sellers/${a!.seller.id}/follow`);
+    setFollowing(r.following);
+    toast(r.following ? `Tu suis ${a!.seller.name}` : "Boutique retirée de tes abonnements", r.following ? "Tu seras prévenu de ses nouveaux arrivages." : undefined, "ok");
   }
 
   async function buy() {
@@ -178,8 +211,15 @@ export default function AuctionDetail() {
         </div>
         <div className="detail">
           <div>
-            <Tilt max={6}>
+            <Tilt max={view3d ? 0 : 6}>
               <div className="gallery-main">
+                {view3d && (
+                  <Suspense fallback={null}>
+                    <div style={{ position: "absolute", inset: 0, zIndex: 2, background: "radial-gradient(70% 70% at 50% 40%, #1d1013, #0d0d10)" }}>
+                      <ProductViewer src={a.images[img]} />
+                    </div>
+                  </Suspense>
+                )}
                 <AnimatePresence mode="wait">
                   <motion.img
                     key={img}
@@ -191,12 +231,18 @@ export default function AuctionDetail() {
                     transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
                   />
                 </AnimatePresence>
-                <div className="tags" style={{ position: "absolute", top: 16, left: 16, display: "flex", gap: 6 }}>
+                {can3D() && (
+                  <button className="chip glass view3d-btn" onClick={() => setView3d(!view3d)}>
+                    {view3d ? "Photo" : "◆ Vue 3D"}
+                  </button>
+                )}
+                <div className="tags" style={{ position: "absolute", top: 16, left: 16, display: "flex", gap: 6, zIndex: 3 }}>
                   {live && (
                     <span className="chip glass">
                       <span className="live-dot" /> En direct
                     </span>
                   )}
+                  {a.inspected && <span className="chip chip-ok glass">✓ Inspecté par Babylone</span>}
                   {a.mode === "multi" ? (
                     <span className="chip glass">
                       {a.quantity} pièces · {a.quantity} gagnants
@@ -345,7 +391,7 @@ export default function AuctionDetail() {
                     disabled={busy || amount < a.next_min || (autoOn && autoMax < amount)}
                     whileTap={{ scale: 0.96 }}
                   >
-                    {busy ? "Envoi…" : autoOn ? `Enchérir ${money(amount)} F · auto jusqu'à ${money(autoMax)} F` : `Enchérir ${money(amount)} F`}
+                    {busy ? "Envoi…" : autoOn ? `${t("Enchérir")} ${money(amount)} F · auto jusqu'à ${money(autoMax)} F` : `${t("Enchérir")} ${money(amount)} F`}
                   </motion.button>
                 )}
                 {a.buy_now_price > 0 && (
@@ -357,6 +403,11 @@ export default function AuctionDetail() {
                   <motion.p className="err" initial={{ x: -8 }} animate={{ x: [8, -6, 4, 0] }} style={{ marginTop: 10 }}>
                     {err}
                   </motion.p>
+                )}
+                {/Caution/.test(err) && (
+                  <button className="btn btn-light btn-sm" style={{ marginTop: 8 }} onClick={payDeposit}>
+                    Verser la caution
+                  </button>
                 )}
                 <p className="muted" style={{ fontSize: 12.5, marginTop: 12 }}>
                   Une offre engage à payer si tu gagnes. Une offre dans les 2 dernières minutes prolonge la vente de 2 minutes.
@@ -413,7 +464,13 @@ export default function AuctionDetail() {
               </div>
             </div>
 
-            <div className="row" style={{ marginTop: 18 }}>
+            {a.live_id && live && (
+              <Link to={`/live/${a.live_id}`} className="btn btn-red btn-block" style={{ marginTop: 14 }}>
+                <span className="live-dot" style={{ background: "#fff" }} /> Présenté en live : rejoindre la salle
+              </Link>
+            )}
+            <div className="row wrap" style={{ marginTop: 18 }}>
+              <Poster a={a} />
               <ShareWhatsApp text={`${a.title} à ${money(a.current_price)} F en ce moment sur Babylone. Fais ton offre :`} path={`/enchere/${a.id}`} />
             </div>
             <div className="divider" />
@@ -455,6 +512,7 @@ export default function AuctionDetail() {
                 </p>
                 <div className="row wrap" style={{ marginTop: 16, gap: 8 }}>
                   <span className="chip">État : {a.condition}</span>
+                  {a.size && <span className="chip">Taille {a.size}</span>}
                   <span className="chip">{a.category}</span>
                   <span className="chip">
                     <IPin size={13} /> {a.city}
@@ -466,6 +524,7 @@ export default function AuctionDetail() {
               </div>
             </Reveal>
 
+            <MarketPrice id={a.id} current={a.current_price} />
             <Reveal>
               <div className="card pad" style={{ marginTop: 16 }}>
                 <div className="row between">
@@ -473,12 +532,12 @@ export default function AuctionDetail() {
                     <span className="avatar" style={{ borderRadius: 14 }}>
                       <IStore size={18} />
                     </span>
-                    <div>
+                    <Link to={`/boutique/${a.seller.id}`}>
                       <b>{a.seller.name}</b>
                       <div className="muted" style={{ fontSize: 13 }}>
-                        Importateur · {a.seller.city}
+                        Importateur · {a.seller.city} · <span className="red">voir la boutique</span>
                       </div>
-                    </div>
+                    </Link>
                   </div>
                   <div className="row" style={{ gap: 6 }}>
                     {a.seller.verified && (
@@ -489,6 +548,11 @@ export default function AuctionDetail() {
                     {a.seller.pro && <span className="chip chip-red">Pro</span>}
                   </div>
                 </div>
+                {user?.id !== a.seller.id && (
+                  <button className={`btn btn-sm ${following ? "btn-ghost" : "btn-red"}`} style={{ marginTop: 12 }} onClick={follow}>
+                    {following ? "Abonné ✓" : `+ ${t("Suivre")} la boutique`}
+                  </button>
+                )}
                 {a.seller.rating ? (
                   <div className="row" style={{ marginTop: 12, fontSize: 14 }}>
                     <Stars value={a.seller.rating} /> <b>{a.seller.rating}</b>

@@ -3,17 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 
-let glCache: boolean | null = null;
-export function webglOK() {
-  if (glCache !== null) return glCache;
-  try {
-    const c = document.createElement("canvas");
-    glCache = !!(window.WebGLRenderingContext && (c.getContext("webgl2") || c.getContext("webgl")));
-  } catch {
-    glCache = false;
-  }
-  return glCache;
-}
+export { webglOK } from "./capability";
 
 // Ne rend la scène que lorsqu'elle est visible (économise batterie et CPU)
 export function useInView<T extends HTMLElement>(margin = "100px") {

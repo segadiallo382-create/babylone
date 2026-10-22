@@ -2,7 +2,8 @@ import { motion } from "framer-motion";
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { AuctionCard } from "../components/AuctionCard";
-import { IBell, ICheck, IGavel, IHeart, IUser, IZap } from "../components/Icons";
+import { IBell, ICheck, IGavel, IHeart, IStar, IStore, IUser, IZap } from "../components/Icons";
+import { Loyalty, Following, SettingsPlus } from "./AccountPlus";
 import { ShareWhatsApp } from "../components/Share";
 import { Empty, Reveal } from "../components/ui";
 import { api, post, type Auction, type Order } from "../lib/api";
@@ -10,12 +11,14 @@ import { liteMode, setLiteMode } from "../lib/perf";
 import { ORDER_STATUS, ago, money } from "../lib/format";
 import { useApp } from "../lib/store";
 
-type Tab = "bids" | "watch" | "orders" | "notifs" | "referral" | "settings";
+type Tab = "bids" | "watch" | "orders" | "notifs" | "loyalty" | "following" | "referral" | "settings";
 const TABS: [Tab, string, any, string][] = [
   ["bids", "Mes enchères", IGavel, "/compte"],
   ["watch", "Suivies", IHeart, "/compte/suivies"],
   ["orders", "Commandes", ICheck, "/compte/commandes"],
   ["notifs", "Notifications", IBell, "/compte/notifications"],
+  ["loyalty", "Fidélité", IStar, "/compte/fidelite"],
+  ["following", "Abonnements & alertes", IStore, "/compte/abonnements"],
   ["referral", "Parrainage", IZap, "/compte/parrainage"],
   ["settings", "Réglages", IUser, "/compte/reglages"],
 ];
@@ -70,7 +73,9 @@ export default function Account() {
               ))}
             {tab === "orders" && <OrderList orders={orders} />}
             {tab === "referral" && <Referral />}
-            {tab === "settings" && <Settings />}
+            {tab === "settings" && <SettingsPlus />}
+            {tab === "loyalty" && <Loyalty />}
+            {tab === "following" && <Following />}
             {tab === "notifs" && (
               <div className="card" style={{ padding: 8 }}>
                 {notifs.length === 0 && <div className="empty">Aucune notification.</div>}
@@ -219,43 +224,3 @@ function Referral() {
   );
 }
 
-function Settings() {
-  const { user, setUser, toast } = useApp();
-  if (!user) return null;
-  const Toggle = ({ on, onClick }: { on: boolean; onClick: () => void }) => (
-    <button className={`switch ${on ? "on" : ""}`} onClick={onClick} aria-pressed={on}>
-      <i />
-    </button>
-  );
-  return (
-    <div className="card" style={{ padding: 8 }}>
-      <div className="row between notif" style={{ alignItems: "center" }}>
-        <span>
-          <b>Alertes WhatsApp</b>
-          <p>Offre dépassée, vente gagnée, rappel de paiement, colis expédié. Envoyées au {user.phone}.</p>
-        </span>
-        <Toggle
-          on={user.whatsapp}
-          onClick={async () => {
-            const r = await post("/me/settings", { whatsapp: !user.whatsapp });
-            setUser(r.user);
-            toast(r.user.whatsapp ? "Alertes WhatsApp activées" : "Alertes WhatsApp coupées", undefined, "ok");
-          }}
-        />
-      </div>
-      <div className="row between notif" style={{ alignItems: "center" }}>
-        <span>
-          <b>Mode allégé</b>
-          <p>Coupe les animations 3D. Utile sur les petits téléphones ou avec peu de connexion.</p>
-        </span>
-        <Toggle on={liteMode()} onClick={() => setLiteMode(!liteMode())} />
-      </div>
-      <div className="row between notif">
-        <span>
-          <b>Téléphone</b>
-          <p>{user.phone} · {user.phone_verified ? "vérifié par SMS" : "non vérifié"}</p>
-        </span>
-      </div>
-    </div>
-  );
-}

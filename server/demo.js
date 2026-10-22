@@ -33,7 +33,7 @@ function relist() {
   const now = Date.now();
   run(
     `INSERT INTO auctions (seller_id, title, description, category, condition, city, region, images, quantity, start_price, reserve_price,
-      current_price, starts_at, ends_at, created_at, mode, buy_now_price) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      current_price, starts_at, ends_at, created_at, mode, buy_now_price, size, search_text, thumbs) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     old.seller_id,
     old.title,
     old.description,
@@ -51,6 +51,9 @@ function relist() {
     now,
     old.mode,
     old.buy_now_price,
+    old.size,
+    old.search_text,
+    old.thumbs,
   );
 }
 

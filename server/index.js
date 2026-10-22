@@ -8,10 +8,14 @@ import { Server } from "socket.io";
 import { UPLOAD_DIR, all, one, run, tx } from "./db.js";
 import { attachUser, checkPassword, hashPassword, issueToken, publicUser, readToken, requireRole, requireUser } from "./auth.js";
 import { BidError, auctionView, buyNow, fcfa, maskName, notify, placeBid, releaseFunds, setIO, tick } from "./engine.js";
-import { CATEGORIES, CITIES, COMMISSION_RATE, CONDITIONS, PRO_PRICE, increment } from "./rules.js";
+import { CATEGORIES, CITIES, COMMISSION_RATE, CONDITIONS, PRO_PRICE, deliveryFee, increment } from "./rules.js";
 import { PAYDUNYA_ENABLED, REAL_PAYMENTS, WAVE_ENABLED, confirmPaydunya, createCheckout, verifyPaydunyaHash, verifyWaveSignature } from "./payments.js";
 import { SMS_ENABLED, WA_ENABLED, sendSMS, sendWhatsApp } from "./messaging.js";
 import { startDemo } from "./demo.js";
+import { buyerReliability, deviceFlags, notifyMatches, onPaid, registerV3, trackEvent } from "./v3.js";
+import { queuePayout } from "./payouts.js";
+import { searchText } from "./text.js";
+import { RELAY_FEE, SIZES, DEPOSIT_AMOUNT, DEPOSIT_THRESHOLD } from "./rules.js";
 
 const PROD = process.env.NODE_ENV === "production";
 const DEMO = process.env.DEMO_MODE ? process.env.DEMO_MODE === "1" : !REAL_PAYMENTS;
@@ -24,6 +28,29 @@ const io = new Server(server, { cors: { origin: PROD ? false : "*" } });
 setIO(io);
 
 app.disable("x-powered-by");
+// En-têtes de sécurité
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(self)");
+  res.setHeader(
+    "Content-Security-Policy",
+    [
+      "default-src 'self'",
+      "script-src 'self'",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+      "font-src 'self' https://fonts.gstatic.com",
+      "img-src 'self' data: blob: https:",
+      "connect-src 'self' ws: wss:",
+      "frame-src https://www.youtube.com https://www.facebook.com",
+      "worker-src 'self'",
+      "frame-ancestors 'none'",
+    ].join("; "),
+  );
+  if (PROD) res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  next();
+});
 app.set("trust proxy", 1); // derrière Nginx/Caddy : req.ip = vraie IP du client
 app.post("/api/webhooks/paydunya", express.urlencoded({ extended: true }), async (req, res) => {
   try {
@@ -31,6 +58,10 @@ app.post("/api/webhooks/paydunya", express.urlencoded({ extended: true }), async
     if (!verifyPaydunyaHash(data.hash)) return res.status(401).end();
     const token = data.invoice?.token;
     const check = token ? await confirmPaydunya(token) : { completed: false };
+    if (check.completed && check.paymentId) {
+      const p = one("SELECT amount FROM payments WHERE id = ?", check.paymentId);
+      if (p && check.amount >= p.amount) paymentHandler(check.paymentId, token);
+    }
     const o = one("SELECT * FROM orders WHERE id = ?", check.orderId);
     if (check.completed && o && check.amount >= o.amount + o.delivery_fee) markPaid(o.id, "paydunya", token);
     res.json({ ok: true });
@@ -70,7 +101,7 @@ setInterval(() => {
 app.use("/api", limit("api", 400));
 app.use("/api/auctions/:id/bid", limit("bid", 40));
 app.use("/api/auth", limit("auth", 20));
-app.use(express.json({ limit: "25mb" }));
+app.use(express.json({ limit: "25mb", verify: (req, _res, buf) => (req.rawBody = buf) }));
 app.use(attachUser);
 app.use("/uploads", express.static(UPLOAD_DIR, { maxAge: "30d", immutable: true }));
 
@@ -92,6 +123,20 @@ const bad = (msg, status = 400) => Object.assign(new Error(msg), { status });
 // ---------- Auth ----------
 const loginAttempts = new Map();
 const normPhone = (p) => String(p || "").replace(/[^\d+]/g, "").replace(/^\+?221/, "");
+
+let paymentHandler = () => false;
+registerV3(app, {
+  wrap,
+  bad,
+  requireUser,
+  requireRole,
+  io,
+  getOrderFor,
+  saveImage,
+  DEMO,
+  announce,
+  setPaymentHandler: (fn) => (paymentHandler = fn),
+});
 
 // ---------- Codes SMS (OTP) ----------
 const otpHash = (phone, purpose, code) => createHash("sha256").update(`${phone}:${purpose}:${code}`).digest("hex");
@@ -177,6 +222,7 @@ app.post(
       req.ip,
       Date.now(),
     );
+    trackEvent("signup", { userId: Number(r.lastInsertRowid) });
     if (referrer) notify(referrer.id, "referral", "Nouveau filleul", `${String(name).trim().split(" ")[0]} s'est inscrit avec ton code.`, "/compte/parrainage");
     const user = one("SELECT * FROM users WHERE id = ?", r.lastInsertRowid);
     notify(
@@ -243,40 +289,16 @@ app.get("/api/meta", (_req, res) =>
     demo: DEMO,
     wave: WAVE_ENABLED,
     paydunya: PAYDUNYA_ENABLED,
+    sizes: SIZES,
+    relay_fee: RELAY_FEE,
+    deposit_amount: DEPOSIT_AMOUNT,
+    deposit_threshold: DEPOSIT_THRESHOLD,
     sms: SMS_ENABLED,
     whatsapp: WA_ENABLED,
   }),
 );
 
 // ---------- Ventes ----------
-const SORTS = {
-  ending: "ends_at ASC",
-  new: "created_at DESC",
-  price_asc: "current_price ASC",
-  price_desc: "current_price DESC",
-  popular: "bids_count DESC",
-};
-
-app.get(
-  "/api/auctions",
-  wrap((req, res) => {
-    const { category, city, region, q, sort = "ending", status = "live", seller } = req.query;
-    const where = ["moderation = 'approved'"];
-    const params = [];
-    if (status === "live") where.push("status = 'live'");
-    else if (status === "ended") where.push("status IN ('sold','unsold')");
-    if (category) where.push("category = ?") && params.push(category);
-    if (city) where.push("city = ?") && params.push(city);
-    if (region) where.push("region = ?") && params.push(region);
-    if (seller) where.push("seller_id = ?") && params.push(Number(seller));
-    if (q) where.push("(title LIKE ? OR description LIKE ?)") && params.push(`%${q}%`, `%${q}%`);
-    const order = `boosted DESC, ${SORTS[sort] || SORTS.ending}`;
-    const limit = Math.min(Number(req.query.limit) || 60, 100);
-    const rows = all(`SELECT * FROM auctions WHERE ${where.join(" AND ")} ORDER BY ${order} LIMIT ${limit}`, ...params);
-    res.json({ auctions: rows.map((a) => auctionView(a, req.user?.id)) });
-  }),
-);
-
 app.get(
   "/api/auctions/:id",
   wrap((req, res) => {
@@ -306,7 +328,12 @@ app.get(
 app.post(
   "/api/auctions/:id/bid",
   requireUser,
-  wrap((req, res) => res.json({ ok: true, bid: placeBid(req.user, Number(req.params.id), req.body.amount, req.body.max_auto, req.ip) })),
+  wrap((req, res) => {
+    const bid = placeBid(req.user, Number(req.params.id), req.body.amount, req.body.max_auto, req.ip);
+    deviceFlags(req.user, Number(req.params.id));
+    trackEvent("bid", { userId: req.user.id });
+    res.json({ ok: true, bid });
+  }),
 );
 
 app.post(
@@ -362,15 +389,20 @@ app.post(
     const reserve = Math.round(Number(b.reserve_price || 0));
     const quantity = Math.max(1, Math.min(1000, Math.round(Number(b.quantity) || 1)));
     const mode = b.mode === "multi" ? "multi" : "lot";
+    const proSeller = req.user.plan_until && req.user.plan_until > Date.now();
+    const flash = b.flash && (proSeller || req.user.role === "admin") ? 1 : 0;
+    const size = SIZES.includes(String(b.size || "").toUpperCase()) ? String(b.size).toUpperCase() : null;
     if (mode === "multi" && quantity < 2) throw bad("Une vente multiple demande au moins 2 pièces.");
     const buyNowPrice = mode === "lot" ? Math.round(Number(b.buy_now_price || 0)) : 0;
     const hours = Math.max(1, Math.min(168, Number(b.duration_hours) || 24));
-    if (!(start >= 500)) throw bad("Prix de départ : 500 FCFA minimum.");
+    if (!(start >= (flash ? 100 : 500))) throw bad(`Prix de départ : ${flash ? 100 : 500} FCFA minimum.`);
+    if (flash && hours > 6) throw bad("Une vente flash dure 6 heures maximum.");
     if (reserve && reserve < start) throw bad("Le prix de réserve doit être au-dessus du prix de départ.");
     if (buyNowPrice && buyNowPrice <= Math.max(start, reserve)) throw bad("Le prix d'achat immédiat doit dépasser le départ et la réserve.");
     const images = (Array.isArray(b.images) ? b.images : []).slice(0, 6);
     if (!images.length) throw bad("Ajoute au moins une photo réelle du produit.");
     const urls = images.map((img) => (String(img).startsWith("/uploads/") ? img : saveImage(img)));
+    const thumbs = Array.isArray(b.thumbs) && b.thumbs.length === images.length ? b.thumbs.map((img) => (String(img).startsWith("/uploads/") ? img : saveImage(img))) : null;
     const live = one("SELECT COUNT(*) n FROM auctions WHERE seller_id = ? AND status = 'live'", req.user.id).n;
     const pro = req.user.plan_until && req.user.plan_until > Date.now();
     if (!pro && live >= 10) throw bad("Offre Standard : 10 ventes en cours maximum. Passe en Pro pour un catalogue illimité.");
@@ -379,7 +411,7 @@ app.post(
     const moderation = req.user.verified || req.user.role === "admin" ? "approved" : "pending";
     const r = run(
       `INSERT INTO auctions (seller_id, title, description, category, condition, city, region, images, quantity, start_price, reserve_price,
-        current_price, starts_at, ends_at, created_at, mode, buy_now_price, moderation) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        current_price, starts_at, ends_at, created_at, mode, buy_now_price, moderation, size, flash, thumbs) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       req.user.id,
       title.slice(0, 90),
       String(b.description || "").slice(0, 2000),
@@ -398,7 +430,11 @@ app.post(
       mode,
       buyNowPrice,
       moderation,
+      size,
+      flash,
+      thumbs ? JSON.stringify(thumbs) : null,
     );
+    run("UPDATE auctions SET search_text = ? WHERE id = ?", searchText(one("SELECT * FROM auctions WHERE id = ?", r.lastInsertRowid)), r.lastInsertRowid);
     const a = one("SELECT * FROM auctions WHERE id = ?", r.lastInsertRowid);
     if (moderation === "pending") {
       for (const ad of all("SELECT id FROM users WHERE role = 'admin'")) notify(ad.id, "moderation", "Annonce à valider", a.title, "/admin");
@@ -421,6 +457,7 @@ function announce(a, sellerId) {
       notify(uid, "match", "Ta demande est disponible", `« ${rq.title} » : ${a.title} vient d'être mis en vente.`, `/enchere/${a.id}`);
     }
   }
+  notifyMatches(a);
   io.emit("feed:new", auctionView(a));
   return notified.size;
 }
@@ -457,6 +494,8 @@ app.get("/api/stats", (_req, res) => {
   res.json({
     live: one("SELECT COUNT(*) n FROM auctions WHERE status = 'live' AND moderation = 'approved'").n,
     bids_24h: one("SELECT COUNT(*) n FROM bids WHERE created_at > ?", dayAgo).n,
+    sold_total: one("SELECT COUNT(*) n FROM orders WHERE status IN ('paid','shipped','delivered','released')").n,
+    lives: one("SELECT COUNT(*) n FROM lives WHERE status = 'live'").n,
     sellers: one("SELECT COUNT(*) n FROM users WHERE role = 'seller'").n,
     buyers: one("SELECT COUNT(*) n FROM users WHERE role = 'buyer'").n,
     by_region: all("SELECT region, COUNT(*) n, SUM(bids_count) bids FROM auctions WHERE status = 'live' AND moderation = 'approved' GROUP BY region"),
@@ -525,6 +564,15 @@ function orderView(o, viewer) {
     buyer: { name: buyer.name, city: buyer.city, phone: showContacts ? buyer.phone : undefined },
     seller: { name: seller.shop_name || seller.name, city: seller.city, phone: showContacts ? seller.phone : undefined },
     review: review || null,
+    delivery_code: viewer?.id === o.buyer_id || viewer?.role === "admin" ? o.delivery_code : undefined,
+    relay: o.relay_id ? one("SELECT * FROM relay_points WHERE id = ?", o.relay_id) : null,
+    buyer_reliability: viewer?.id === o.seller_id || viewer?.role === "admin" ? buyerReliability(o.buyer_id) : undefined,
+    buyer_review: one("SELECT rating, comment FROM buyer_reviews WHERE order_id = ?", o.id) || null,
+    payout_status:
+      viewer?.id === o.seller_id || viewer?.role === "admin"
+        ? one("SELECT status, method, account FROM payouts WHERE order_id = ? AND kind = 'seller_payout' ORDER BY id DESC", o.id) || null
+        : undefined,
+    messages: one("SELECT COUNT(*) n FROM order_messages WHERE order_id = ?", o.id).n,
   };
 }
 
@@ -554,6 +602,7 @@ function markPaid(orderId, provider, ref) {
   const o = one("SELECT * FROM orders WHERE id = ?", orderId);
   if (!o || o.status !== "awaiting_payment") return false;
   run("UPDATE orders SET status = 'paid', provider = ?, payment_ref = ?, updated_at = ? WHERE id = ?", provider, ref, Date.now(), o.id);
+  onPaid(o);
   const a = one("SELECT title FROM auctions WHERE id = ?", o.auction_id);
   notify(o.buyer_id, "paid", "Paiement reçu", `${a.title} : ton argent est sécurisé jusqu'à la livraison.`, `/compte/commandes/${o.id}`);
   notify(o.seller_id, "to_ship", "À expédier", `${a.title} est payé. Prépare la livraison.`, `/vendeur`);
@@ -569,10 +618,25 @@ app.post(
     if (o.buyer_id !== req.user.id) throw bad("Seul l'acheteur peut payer.", 403);
     if (o.status !== "awaiting_payment") throw bad("Cette commande n'attend pas de paiement.");
     const provider = ["wave", "orange_money"].includes(req.body.provider) ? req.body.provider : "wave";
-    const address = String(req.body.address || "").trim();
+    const relay = req.body.delivery_mode === "relay" ? one("SELECT * FROM relay_points WHERE id = ?", Number(req.body.relay_id)) : null;
+    if (req.body.delivery_mode === "relay" && !relay) throw bad("Choisis un point relais.");
+    const address = relay ? `${relay.name}, ${relay.address}` : String(req.body.address || "").trim();
     if (address.length < 5) throw bad("Indique ton adresse de livraison.");
-    run("UPDATE orders SET address = ?, provider = ?, updated_at = ? WHERE id = ?", address.slice(0, 200), provider, Date.now(), o.id);
-    const checkout = await createCheckout(o, provider, one("SELECT title FROM auctions WHERE id = ?", o.auction_id)?.title);
+    const a0 = one("SELECT city FROM auctions WHERE id = ?", o.auction_id);
+    const buyerCity = one("SELECT city FROM users WHERE id = ?", o.buyer_id)?.city;
+    const fee = relay ? RELAY_FEE : deliveryFee(a0.city, buyerCity || a0.city);
+    run(
+      "UPDATE orders SET address = ?, provider = ?, delivery_mode = ?, relay_id = ?, delivery_fee = ?, updated_at = ? WHERE id = ?",
+      address.slice(0, 200),
+      provider,
+      relay ? "relay" : "home",
+      relay?.id ?? null,
+      fee,
+      Date.now(),
+      o.id,
+    );
+    const fresh = one("SELECT * FROM orders WHERE id = ?", o.id);
+    const checkout = await createCheckout(fresh, provider, one("SELECT title FROM auctions WHERE id = ?", o.auction_id)?.title);
     run("UPDATE orders SET payment_ref = ? WHERE id = ?", checkout.ref, o.id);
     res.json(checkout);
   }),
@@ -617,23 +681,6 @@ app.post(
     if (o.buyer_id !== req.user.id) throw bad("Réservé à l'acheteur.", 403);
     setStatus(o, "shipped", "delivered", "buyer");
     releaseFunds(o.id);
-    res.json({ ok: true });
-  }),
-);
-
-app.post(
-  "/api/orders/:id/dispute",
-  requireUser,
-  wrap((req, res) => {
-    const o = getOrderFor(req);
-    if (o.buyer_id !== req.user.id) throw bad("Réservé à l'acheteur.", 403);
-    if (!["paid", "shipped", "delivered"].includes(o.status)) throw bad("Litige impossible à cette étape.");
-    run("UPDATE orders SET status = 'disputed', updated_at = ? WHERE id = ?", Date.now(), o.id);
-    const a = one("SELECT title FROM auctions WHERE id = ?", o.auction_id);
-    notify(o.seller_id, "dispute", "Litige ouvert", `${a.title} : l'acheteur a signalé un problème. Les fonds restent bloqués.`, "/vendeur");
-    for (const ad of all("SELECT id FROM users WHERE role = 'admin'")) {
-      notify(ad.id, "dispute", "Nouveau litige", `Commande #${o.id} : ${String(req.body.reason || "").slice(0, 200)}`, "/admin");
-    }
     res.json({ ok: true });
   }),
 );
@@ -762,6 +809,18 @@ app.get(
       auctions: auctions.map((a) => auctionView(a, uid)),
       orders: orders.map((o) => orderView(o, req.user)),
       demands: demands.map((d) => ({ ...d, mine: myCats.includes(d.category) })),
+      // Heures où les acheteurs enchérissent le plus (30 derniers jours) : meilleur moment pour clôturer
+      hours: (() => {
+        const h = Array(24).fill(0);
+        for (const b of all(
+          "SELECT b.created_at FROM bids b JOIN auctions a ON a.id = b.auction_id WHERE a.seller_id = ? AND b.created_at > ?",
+          uid,
+          Date.now() - 30 * 24 * 3600 * 1000,
+        ))
+          h[new Date(b.created_at).getHours()]++;
+        return h;
+      })(),
+      payouts: all("SELECT id, order_id, kind, amount, method, account, status, created_at FROM payouts WHERE user_id = ? ORDER BY id DESC LIMIT 20", uid),
     });
   }),
 );
@@ -896,11 +955,12 @@ app.post(
     const a = one("SELECT title FROM auctions WHERE id = ?", o.auction_id);
     if (req.params.action === "release") {
       if (!["delivered", "disputed", "shipped"].includes(o.status)) throw bad("Fonds non libérables à cette étape.");
-      run("UPDATE orders SET status = 'delivered' WHERE id = ?", o.id);
+      run("UPDATE orders SET status = 'delivered', decision = ? WHERE id = ?", String(req.body.note || "Fonds libérés au vendeur").slice(0, 300), o.id);
       releaseFunds(o.id);
     } else if (req.params.action === "refund") {
       if (!["paid", "shipped", "disputed"].includes(o.status)) throw bad("Remboursement impossible à cette étape.");
-      run("UPDATE orders SET status = 'refunded', updated_at = ? WHERE id = ?", Date.now(), o.id);
+      run("UPDATE orders SET status = 'refunded', decision = ?, updated_at = ? WHERE id = ?", String(req.body.note || "Acheteur remboursé").slice(0, 300), Date.now(), o.id);
+      queuePayout("refund", o.buyer_id, o.amount + o.delivery_fee, o.id);
       notify(o.buyer_id, "refund", "Remboursement validé", `${a.title} : ${fcfa(o.amount + o.delivery_fee)} te sont reversés.`, `/compte/commandes/${o.id}`);
     } else throw bad("Action inconnue.");
     res.json({ ok: true });
@@ -910,7 +970,13 @@ app.post(
 // ---------- Front en production ----------
 const dist = join(here, "..", "web", "dist");
 if (existsSync(dist)) {
-  const indexHtml = readFileSync(join(dist, "index.html"), "utf8");
+  // Relu si le build change (sinon un ancien index pointerait vers des fichiers supprimés)
+  let cache = { mtime: 0, html: "" };
+  const readIndex = () => {
+    const m = statSync(join(dist, "index.html")).mtimeMs;
+    if (m !== cache.mtime) cache = { mtime: m, html: readFileSync(join(dist, "index.html"), "utf8") };
+    return cache.html;
+  };
   const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
   app.use(
     express.static(dist, {
@@ -924,6 +990,7 @@ if (existsSync(dist)) {
   app.get(/^(?!\/(api|uploads|socket\.io)).*/, (req, res) => {
     const m = /^\/enchere\/(\d+)/.exec(req.path);
     const a = m ? one("SELECT * FROM auctions WHERE id = ? AND moderation = 'approved'", Number(m[1])) : null;
+    const indexHtml = readIndex();
     if (!a) return res.type("html").send(indexHtml);
     const base = process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || `${req.protocol}://${req.get("host")}`;
     const img = JSON.parse(a.images)[0];

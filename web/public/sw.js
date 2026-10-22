@@ -1,5 +1,5 @@
 // Service worker : site installable, fichiers statiques en cache, page hors ligne simple.
-const CACHE = "babylone-v1";
+const CACHE = "babylone-v3";
 const SHELL = ["/", "/favicon.svg", "/manifest.webmanifest", "/icon-192.png"];
 
 self.addEventListener("install", (e) => {
@@ -36,4 +36,28 @@ self.addEventListener("fetch", (e) => {
   if (e.request.mode === "navigate") {
     e.respondWith(fetch(e.request).catch(() => caches.match("/")));
   }
+});
+
+// Notifications push
+self.addEventListener("push", (e) => {
+  const d = e.data ? e.data.json() : { title: "Babylone", body: "" };
+  e.waitUntil(
+    self.registration.showNotification(d.title || "Babylone", {
+      body: d.body || "",
+      icon: "/icon-192.png",
+      badge: "/icon-192.png",
+      data: { link: d.link || "/" },
+      vibrate: [80, 40, 80],
+    }),
+  );
+});
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  const link = e.notification.data?.link || "/";
+  e.waitUntil(
+    self.clients.matchAll({ type: "window" }).then((list) => {
+      for (const c of list) if ("focus" in c) return c.navigate(link).then((w) => w && w.focus());
+      return self.clients.openWindow(link);
+    }),
+  );
 });

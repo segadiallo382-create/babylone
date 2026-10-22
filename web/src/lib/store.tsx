@@ -64,6 +64,10 @@ type Meta = {
   paydunya: boolean;
   sms: boolean;
   whatsapp: boolean;
+  sizes: string[];
+  relay_fee: number;
+  deposit_amount: number;
+  deposit_threshold: number;
 };
 
 type Ctx = {
@@ -171,11 +175,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
   return <AppCtx.Provider value={value}>{children}</AppCtx.Provider>;
 }
 
-// Tic d'horloge partagé pour les comptes à rebours
+// Tic d'horloge partagé pour les comptes à rebours, calé sur l'heure du serveur
+// (un téléphone mal réglé afficherait sinon une mauvaise fin de vente)
+let offset = 0;
+async function syncClock() {
+  try {
+    const t0 = Date.now();
+    const { now: server } = await api<{ now: number }>("/time");
+    const t1 = Date.now();
+    offset = server - (t0 + t1) / 2;
+  } catch {
+    /* hors ligne : on garde l'heure locale */
+  }
+}
+syncClock();
+setInterval(syncClock, 5 * 60 * 1000);
+export const serverNow = () => Date.now() + offset;
+
 const clockListeners = new Set<() => void>();
-let now = Date.now();
+let now = serverNow();
 setInterval(() => {
-  now = Date.now();
+  now = serverNow();
   clockListeners.forEach((l) => l());
 }, 1000);
 export function useNow() {
@@ -186,4 +206,18 @@ export function useNow() {
     },
     () => now,
   );
+}
+
+// Statistiques d'audience anonymes (visites et pages vues)
+const session = (() => {
+  try {
+    let s = sessionStorage.getItem("babylone.session");
+    if (!s) sessionStorage.setItem("babylone.session", (s = Math.random().toString(36).slice(2)));
+    return s;
+  } catch {
+    return "";
+  }
+})();
+export function track(kind: "visit" | "view", path = location.pathname) {
+  fetch("/api/track", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind, path, session }), keepalive: true }).catch(() => {});
 }

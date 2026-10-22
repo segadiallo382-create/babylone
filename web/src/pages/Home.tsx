@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { AuctionCard, CardSkeleton } from "../components/AuctionCard";
 import { CAT_ICONS, IArrow, ICheck, IGavel, IMegaphone, IShield, ITruck } from "../components/Icons";
 import { MapSection } from "../components/MapSection";
+import { ArrivagesTeaser, CategoryRing, Circular, FlashRow, LiveBanner, Themes } from "../components/HomePlus";
 import { CountUp, Reveal, SplitTitle, Tilt } from "../components/ui";
 import { api, type Auction } from "../lib/api";
 import { money } from "../lib/format";
@@ -11,7 +12,7 @@ import { useApp } from "../lib/store";
 
 const HeroScene = lazy(() => import("../three/HeroScene").then((m) => ({ default: m.HeroScene })));
 
-type Stats = { live: number; bids_24h: number; sellers: number; buyers: number; by_category: { category: string; n: number }[] };
+type Stats = { live: number; bids_24h: number; sellers: number; buyers: number; sold_total: number; by_category: { category: string; n: number }[] };
 
 export default function Home() {
   const [ending, setEnding] = useState<Auction[] | null>(null);
@@ -84,6 +85,9 @@ export default function Home() {
           </Suspense>
         </div>
       </section>
+
+      <LiveBanner />
+      <FlashRow />
 
       <section className="section" style={{ paddingTop: 40 }}>
         <div className="container">
@@ -166,28 +170,14 @@ export default function Home() {
               <h2 className="display">Arrivages du moment</h2>
             </Reveal>
           </div>
-          <div className="cats">
-            {(meta?.categories || []).map((c, i) => {
-              const Icon = CAT_ICONS[c];
-              return (
-                <Reveal key={c} i={i % 4}>
-                  <Tilt max={12} glare={false}>
-                    <Link to={`/encheres?category=${encodeURIComponent(c)}`} className="card cat" style={{ display: "flex" }}>
-                      <span className="ico">{Icon && <Icon size={22} />}</span>
-                      <span>
-                        <b>{c}</b>
-                        <div className="muted" style={{ fontSize: 13 }}>
-                          {catCount(c)} vente{catCount(c) > 1 ? "s" : ""} en cours
-                        </div>
-                      </span>
-                    </Link>
-                  </Tilt>
-                </Reveal>
-              );
-            })}
-          </div>
+          <Reveal>
+            <CategoryRing categories={meta?.categories || []} counts={catCount} />
+          </Reveal>
         </div>
       </section>
+
+      <Themes />
+      <ArrivagesTeaser />
 
       <section className="section">
         <div className="container" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 40, alignItems: "center" }}>
@@ -247,6 +237,8 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      <Circular sold={stats?.sold_total || 0} />
 
       <section className="section">
         <div className="container">

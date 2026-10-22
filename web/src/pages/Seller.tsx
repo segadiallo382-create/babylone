@@ -1,6 +1,8 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
+import { BulkPublish, EditModal, HourChart, SellerLives, SellerPreorders, SellerSettings, photoPair } from "./SellerPlus";
+import { download } from "../lib/api";
 import { AuctionCard } from "../components/AuctionCard";
 import { IBox, IChart, IGavel, IMegaphone, IPlus, IZap } from "../components/Icons";
 import { CountUp, Empty, Reveal } from "../components/ui";
@@ -8,7 +10,7 @@ import { api, post, type Auction, type Order, type User } from "../lib/api";
 import { ORDER_STATUS, fcfa, money, resizeImage } from "../lib/format";
 import { useApp } from "../lib/store";
 
-type Tab = "overview" | "auctions" | "new" | "orders" | "demands" | "pro";
+type Tab = "overview" | "auctions" | "new" | "bulk" | "orders" | "lives" | "preorders" | "demands" | "settings" | "pro";
 type Dash = {
   user: User;
   kpis: { live: number; gmv: number; payout: number; pending_payout: number; views: number; bids: number; sell_through: number | null };
@@ -16,10 +18,14 @@ type Dash = {
   auctions: Auction[];
   orders: Order[];
   demands: { id: number; title: string; category: string; budget_max: number | null; city: string; votes: number; mine: boolean }[];
+  hours: number[];
+  payouts: { id: number; kind: string; amount: number; method: string; account: string; status: string; created_at: number }[];
 };
 
 export default function Seller() {
-  const [tab, setTab] = useState<Tab>("overview");
+  const [sp, setSp] = useSearchParams();
+  const tab = (sp.get("tab") as Tab) || "overview";
+  const setTab = (t: Tab) => setSp(t === "overview" ? {} : { tab: t }, { replace: true });
   const [d, setD] = useState<Dash | null>(null);
   const load = useCallback(() => api("/seller/dashboard").then(setD), []);
   useEffect(() => {
@@ -31,8 +37,12 @@ export default function Seller() {
     ["overview", "Vue d'ensemble", IChart],
     ["auctions", "Mes ventes", IGavel],
     ["new", "Nouvelle vente", IPlus],
+    ["bulk", "Publication multiple", IPlus],
     ["orders", "Commandes", IBox, toShip],
+    ["lives", "Live", IZap],
+    ["preorders", "Arrivages", IBox],
     ["demands", "Demandes", IMegaphone],
+    ["settings", "Versements", IGavel],
     ["pro", "Offre Pro", IZap],
   ];
 
@@ -81,6 +91,19 @@ export default function Seller() {
                     setTab("auctions");
                   }}
                 />
+              ) : tab === "bulk" ? (
+                <BulkPublish
+                  onDone={() => {
+                    load();
+                    setTab("auctions");
+                  }}
+                />
+              ) : tab === "lives" ? (
+                <SellerLives auctions={d.auctions} />
+              ) : tab === "preorders" ? (
+                <SellerPreorders />
+              ) : tab === "settings" ? (
+                <SellerSettings payouts={d.payouts} />
               ) : tab === "orders" ? (
                 <SellerOrders orders={d.orders} reload={load} />
               ) : tab === "demands" ? (
@@ -160,9 +183,13 @@ function Overview({ d, go }: { d: Dash; go: (t: Tab) => void }) {
           <Chart series={d.series} />
         </div>
       </div>
+      <HourChart hours={d.hours} />
       <div className="row wrap">
         <button className="btn btn-red" onClick={() => go("new")}>
           <IPlus size={18} /> Publier une vente
+        </button>
+        <button className="btn btn-ghost" onClick={() => download("/seller/export.csv", "babylone-ventes.csv")}>
+          Export comptable (CSV)
         </button>
         {d.orders.some((o) => o.status === "paid") && (
           <button className="btn btn-ghost" onClick={() => go("orders")}>
@@ -176,6 +203,16 @@ function Overview({ d, go }: { d: Dash; go: (t: Tab) => void }) {
 
 function MyAuctions({ d, reload }: { d: Dash; reload: () => void }) {
   const { toast } = useApp();
+  const [editing, setEditing] = useState<Auction | null>(null);
+  const relist = async (a: Auction) => {
+    try {
+      const r = await post(`/auctions/${a.id}/relist`, { duration_hours: 48 });
+      toast(r.pending ? "Copie envoyée en validation" : "Remise en vente", undefined, "ok");
+      reload();
+    } catch (e: any) {
+      toast(e.message);
+    }
+  };
   if (!d.auctions.length) return <Empty title="Aucune vente publiée.">Publie ton premier article en 2 minutes.</Empty>;
   const pro = d.user.plan === "pro";
   return (
@@ -222,6 +259,14 @@ function MyAuctions({ d, reload }: { d: Dash; reload: () => void }) {
               </td>
               <td>
                 <div className="row" style={{ gap: 6, justifyContent: "end" }}>
+                  {a.status === "live" && (
+                    <button className="chip" onClick={() => setEditing(a)}>
+                      Modifier
+                    </button>
+                  )}
+                  <button className="chip" onClick={() => relist(a)}>
+                    {a.status === "live" ? "Dupliquer" : "Remettre en vente"}
+                  </button>
                   {a.status === "live" && pro && (
                     <button
                       className={`chip ${a.boosted ? "chip-red" : ""}`}
@@ -255,6 +300,18 @@ function MyAuctions({ d, reload }: { d: Dash; reload: () => void }) {
           ))}
         </tbody>
       </table>
+      <AnimatePresence>
+        {editing && (
+          <EditModal
+            a={editing}
+            onClose={() => setEditing(null)}
+            onSaved={() => {
+              setEditing(null);
+              reload();
+            }}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -273,7 +330,26 @@ function NewAuction({ onDone }: { onDone: () => void }) {
     buy_now_price: "",
     mode: "lot" as "lot" | "multi",
     duration_hours: "48",
+    size: "",
+    flash: false,
   });
+  const [thumbs, setThumbs] = useState<string[]>([]);
+  const [hint, setHint] = useState<{ category: string | null; start_hint: number | null; reserve_hint: number | null; stats: any } | null>(null);
+  useEffect(() => {
+    if (f.title.trim().length < 4) return setHint(null);
+    const id = setTimeout(
+      () =>
+        post("/suggest", { title: f.title, category: f.category || undefined })
+          .then((r) => {
+            setHint(r);
+            if (r.category) setF((x) => (x.category ? x : { ...x, category: r.category }));
+          })
+          .catch(() => {}),
+      600,
+    );
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [f.title]);
   const [images, setImages] = useState<string[]>([]);
   const [over, setOver] = useState(false);
   const [err, setErr] = useState("");
@@ -284,8 +360,9 @@ function NewAuction({ onDone }: { onDone: () => void }) {
 
   async function addFiles(files: FileList | null) {
     if (!files) return;
-    const list = await Promise.all([...files].slice(0, 6 - images.length).map((file) => resizeImage(file)));
-    setImages((x) => [...x, ...list].slice(0, 6));
+    const list = await Promise.all([...files].slice(0, 6 - images.length).map((file) => photoPair(file)));
+    setImages((x) => [...x, ...list.map((p) => p.full)].slice(0, 6));
+    setThumbs((x) => [...x, ...list.map((p) => p.thumb)].slice(0, 6));
   }
 
   async function submit(e: FormEvent) {
@@ -300,7 +377,9 @@ function NewAuction({ onDone }: { onDone: () => void }) {
         reserve_price: n(f.reserve_price),
         buy_now_price: f.mode === "lot" ? n(f.buy_now_price) : 0,
         duration_hours: Number(f.duration_hours),
+        size: f.size || undefined,
         images,
+        thumbs: thumbs.length === images.length ? thumbs : undefined,
       });
       if (r.pending) toast("Annonce envoyée", "Elle sera en ligne dès que ton compte vendeur est vérifié par l'équipe Babylone.", "ok");
       else toast("Vente publiée", r.notified ? `${r.notified} acheteur(s) qui attendaient ce produit ont été prévenus.` : "Elle est en ligne.", "ok");
@@ -327,6 +406,11 @@ function NewAuction({ onDone }: { onDone: () => void }) {
     my_rank: null,
     my_auto_max: null,
     moderation: "approved",
+    thumbs: null,
+    size: f.size || null,
+    inspected: false,
+    flash: f.flash,
+    live_id: null,
     start_price: n(f.start_price),
     current_price: n(f.start_price) || 0,
     has_reserve: n(f.reserve_price) > 0,
@@ -374,7 +458,14 @@ function NewAuction({ onDone }: { onDone: () => void }) {
             {images.map((src, i) => (
               <motion.div key={i} initial={{ scale: 0.6, rotate: -8, opacity: 0 }} animate={{ scale: 1, rotate: 0, opacity: 1 }}>
                 <img src={src} alt="" />
-                <button type="button" onClick={() => setImages((x) => x.filter((_, j) => j !== i))} aria-label="Retirer">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setImages((x) => x.filter((_, j) => j !== i));
+                    setThumbs((x) => x.filter((_, j) => j !== i));
+                  }}
+                  aria-label="Retirer"
+                >
                   ×
                 </button>
               </motion.div>
@@ -418,9 +509,30 @@ function NewAuction({ onDone }: { onDone: () => void }) {
           </label>
         </div>
         <label className="field">
+          <span>Taille / pointure (mode et chaussures)</span>
+          <select className="select" value={f.size} onChange={set("size")}>
+            <option value="">Sans objet</option>
+            {meta?.sizes.map((s) => (
+              <option key={s}>{s}</option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
           <span>Description</span>
           <textarea className="textarea" value={f.description} onChange={set("description")} placeholder="Provenance, tailles, défauts éventuels, garantie…" />
         </label>
+        <AnimatePresence>
+          {hint?.stats && (
+            <motion.div className="hint" initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+              <b>Prix du marché</b> : {hint.stats.count} vente(s) {hint.stats.similar ? "similaire(s)" : "de la catégorie"} entre {money(hint.stats.low)} F et {money(hint.stats.high)} F.
+              {hint.start_hint && (
+                <button type="button" className="chip chip-ok" style={{ marginLeft: 8 }} onClick={() => setF((x) => ({ ...x, start_price: String(hint.start_hint), reserve_price: String(hint.reserve_hint || "") }))}>
+                  Appliquer : départ {money(hint.start_hint)} F · réserve {money(hint.reserve_hint || 0)} F
+                </button>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
         <div className="form-2">
           <label className="field">
             <span>{f.mode === "multi" ? "Prix de départ par pièce" : "Prix de départ (FCFA)"}</span>
@@ -454,6 +566,14 @@ function NewAuction({ onDone }: { onDone: () => void }) {
             </select>
           </label>
         </div>
+        {user?.plan === "pro" && (
+          <label className="row" style={{ gap: 10, cursor: "pointer" }}>
+            <input type="checkbox" checked={f.flash} onChange={(e) => setF({ ...f, flash: e.target.checked, duration_hours: e.target.checked ? "6" : f.duration_hours })} />
+            <span>
+              <b>⚡ Vente flash</b> <span className="muted" style={{ fontSize: 13 }}>départ dès 100 F, 6 h max, mise en avant sur l'accueil (Pro)</span>
+            </span>
+          </label>
+        )}
         {f.mode === "lot" && (
           <label className="field">
             <span>Prix d'achat immédiat (optionnel)</span>
@@ -509,7 +629,14 @@ function SellerOrders({ orders, reload }: { orders: Order[]; reload: () => void 
                   </div>
                 </span>
               </span>
-              <span className={`chip ${kind ? `chip-${kind}` : ""}`}>{label}</span>
+              <span className="row">
+                {o.buyer_reliability?.score != null && <span className={`chip ${o.buyer_reliability.score >= 90 ? "chip-ok" : "chip-warn"}`}>Fiabilité {o.buyer_reliability.score} %</span>}
+                {o.messages > 0 && <span className="chip">💬 {o.messages}</span>}
+                <span className={`chip ${kind ? `chip-${kind}` : ""}`}>{label}</span>
+                <Link to={`/compte/commandes/${o.id}`} className="chip chip-red">
+                  Ouvrir
+                </Link>
+              </span>
             </div>
             <div className="row wrap between" style={{ marginTop: 14, gap: 12 }}>
               <span className="muted num" style={{ fontSize: 14 }}>
