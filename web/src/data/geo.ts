@@ -1,0 +1,40 @@
+// Libellés des régions et coordonnées des villes (lon, lat)
+export const REGION_LABEL: Record<string, string> = {
+  Dakar: "Dakar",
+  Thies: "Thiès",
+  "Saint Louis": "Saint-Louis",
+  Diourbel: "Diourbel",
+  Kaolack: "Kaolack",
+  Fatick: "Fatick",
+  Louga: "Louga",
+  Ziguinchor: "Ziguinchor",
+  Kolda: "Kolda",
+  Tambacounda: "Tambacounda",
+  Kaffrine: "Kaffrine",
+  Matam: "Matam",
+  Sedhiou: "Sédhiou",
+  Kedougou: "Kédougou",
+};
+
+export const CITY_COORDS: Record<string, [number, number]> = {
+  Dakar: [-17.44, 14.69],
+  Pikine: [-17.39, 14.75],
+  Rufisque: [-17.27, 14.72],
+  Thiès: [-16.93, 14.79],
+  Mbour: [-16.96, 14.42],
+  Tivaouane: [-16.81, 14.95],
+  "Saint-Louis": [-16.49, 16.03],
+  Touba: [-15.88, 14.86],
+  Diourbel: [-16.23, 14.66],
+  Kaolack: [-16.07, 14.15],
+  Fatick: [-16.41, 14.34],
+  Louga: [-16.22, 15.62],
+  Ziguinchor: [-16.27, 12.58],
+  Kolda: [-14.95, 12.89],
+  Tambacounda: [-13.67, 13.77],
+  Kaffrine: [-15.55, 14.1],
+  Matam: [-13.25, 15.66],
+  Sédhiou: [-15.56, 12.71],
+  Kédougou: [-12.18, 12.56],
+};
+
