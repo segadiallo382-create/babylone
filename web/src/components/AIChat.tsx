@@ -76,6 +76,12 @@ export function AIChat() {
               {msgs.length === 0 && (
                 <div className="stack" style={{ gap: 8 }}>
                   <p className="muted" style={{ fontSize: 14 }}>Salut ! Dis-moi ce que tu cherches, ton budget ou ta ville.</p>
+                  <p className="muted" style={{ fontSize: 12 }}>
+                    Réponses générées par une IA (Google Gemini). N'écris aucun mot de passe, code ou information personnelle.{" "}
+                    <Link to="/confidentialite#5-intelligence-artificielle" onClick={() => setOpen(false)} className="red">
+                      En savoir plus
+                    </Link>
+                  </p>
                   {SUGGESTIONS.map((s) => (
                     <button key={s} className="chip" style={{ justifySelf: "start" }} onClick={() => send(s)}>
                       {s}

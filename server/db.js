@@ -183,6 +183,7 @@ addColumn("auctions", "flash", "INTEGER NOT NULL DEFAULT 0");
 addColumn("auctions", "thumbs", "TEXT");
 addColumn("auctions", "live_id", "INTEGER");
 addColumn("auctions", "ai_review", "TEXT"); // avis de la modération IA (JSON)
+addColumn("users", "terms_accepted_at", "INTEGER"); // acceptation des CGU et de la politique de confidentialité (preuve)
 addColumn("users", "points", "INTEGER NOT NULL DEFAULT 0");
 addColumn("users", "payout_method", "TEXT"); // wave | orange_money
 addColumn("users", "payout_account", "TEXT");

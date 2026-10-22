@@ -262,6 +262,50 @@ export async function botReply(phoneRaw, text) {
   }
 }
 
+// Effacement d'un compte (à la demande, ou après 3 ans d'inactivité) : seules restent les commandes, pour la comptabilité
+function anonymizeUser(u) {
+  if (u.deposit) queuePayout("deposit_refund", u.id, u.deposit);
+  tx(() => {
+    run("UPDATE auctions SET status = 'cancelled' WHERE seller_id = ? AND status = 'live' AND bids_count = 0", u.id);
+    for (const t of ["watches", "auto_bids", "saved_searches", "push_subs", "devices"]) run(`DELETE FROM ${t} WHERE user_id = ?`, u.id);
+    run("DELETE FROM follows WHERE user_id = ? OR seller_id = ?", u.id, u.id);
+    const { salt, hash } = hashPassword(randomBytes(16).toString("hex"));
+    run(
+      `UPDATE users SET name = 'Compte supprimé', phone = ?, password_hash = ?, salt = ?, shop_name = NULL, bio = NULL, payout_account = NULL,
+       whatsapp = 0, deleted = 1, blocked = 1, deposit = 0, last_ip = NULL WHERE id = ?`,
+      `supprime-${u.id}`,
+      hash,
+      salt,
+      u.id,
+    );
+  });
+}
+
+// Durées de conservation annoncées dans la politique de confidentialité
+const DAY = 24 * H;
+export function purgeOldData(now = Date.now()) {
+  const year = now - 365 * DAY;
+  run("DELETE FROM devices WHERE last_seen < ?", year);
+  run("DELETE FROM events WHERE created_at < ?", year);
+  run("DELETE FROM outbox WHERE created_at < ?", year);
+  run("DELETE FROM fraud_flags WHERE resolved = 1 AND created_at < ?", year);
+  // Comptes sans activité depuis 3 ans (ni appareil vu, ni offre, ni commande), hors admins et commandes en cours
+  const old = now - 3 * 365 * DAY;
+  const inactive = all(
+    `SELECT u.* FROM users u WHERE u.deleted = 0 AND u.role != 'admin' AND u.created_at < ?
+       AND NOT EXISTS (SELECT 1 FROM devices d WHERE d.user_id = u.id AND d.last_seen >= ?)
+       AND NOT EXISTS (SELECT 1 FROM bids b WHERE b.user_id = u.id AND b.created_at >= ?)
+       AND NOT EXISTS (SELECT 1 FROM orders o WHERE (o.buyer_id = u.id OR o.seller_id = u.id) AND (o.created_at >= ? OR o.status IN ('awaiting_payment','paid','shipped','delivered','disputed')))
+       AND NOT EXISTS (SELECT 1 FROM auctions a WHERE a.seller_id = u.id AND a.status = 'live')`,
+    old,
+    old,
+    old,
+    old,
+  );
+  for (const u of inactive) anonymizeUser(u);
+  return inactive.length;
+}
+
 export function registerV3(app, h) {
   const { wrap, bad, requireUser, requireRole, io, getOrderFor, saveImage, DEMO } = h;
   const admins = () => all("SELECT id FROM users WHERE role = 'admin'");
@@ -641,21 +685,7 @@ export function registerV3(app, h) {
       ).n;
       if (active) throw bad("Des commandes sont en cours. Termine-les avant de supprimer ton compte.");
       if (one("SELECT 1 FROM auctions WHERE leader_id = ? AND status = 'live'", u.id)) throw bad("Tu es en tête d'une vente en cours.");
-      if (u.deposit) queuePayout("deposit_refund", u.id, u.deposit);
-      tx(() => {
-        run("UPDATE auctions SET status = 'cancelled' WHERE seller_id = ? AND status = 'live' AND bids_count = 0", u.id);
-        for (const t of ["watches", "auto_bids", "saved_searches", "push_subs", "devices"]) run(`DELETE FROM ${t} WHERE user_id = ?`, u.id);
-        run("DELETE FROM follows WHERE user_id = ? OR seller_id = ?", u.id, u.id);
-        const { salt, hash } = hashPassword(randomBytes(16).toString("hex"));
-        run(
-          `UPDATE users SET name = 'Compte supprimé', phone = ?, password_hash = ?, salt = ?, shop_name = NULL, bio = NULL, payout_account = NULL,
-           whatsapp = 0, deleted = 1, blocked = 1, deposit = 0, last_ip = NULL WHERE id = ?`,
-          `supprime-${u.id}`,
-          hash,
-          salt,
-          u.id,
-        );
-      });
+      anonymizeUser(u);
       res.json({ ok: true });
     }),
   );
@@ -915,6 +945,12 @@ export function registerV3(app, h) {
         backup();
       } catch (e) {
         console.error("[backup]", e);
+      }
+      try {
+        const n = purgeOldData();
+        if (n) console.log(`[purge] ${n} compte(s) inactif(s) depuis 3 ans effacé(s)`);
+      } catch (e) {
+        console.error("[purge]", e);
       }
     }
   });
@@ -1325,6 +1361,9 @@ export function registerV3(app, h) {
       "/demandes",
       "/vendre",
       "/regles",
+      "/cgu",
+      "/confidentialite",
+      "/mentions-legales",
       ...CATEGORIES.map((c) => `/encheres?category=${encodeURIComponent(c)}`),
       ...all("SELECT id FROM auctions WHERE moderation = 'approved' AND status = 'live' ORDER BY id DESC LIMIT 2000").map((a) => `/enchere/${a.id}`),
       ...all("SELECT id FROM users WHERE role = 'seller' AND deleted = 0").map((u) => `/boutique/${u.id}`),

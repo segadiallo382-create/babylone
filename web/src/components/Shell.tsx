@@ -333,6 +333,7 @@ export function Footer() {
             <Link to="/regles">Règles des enchères</Link>
             <Link to="/cgu">Conditions générales</Link>
             <Link to="/confidentialite">Confidentialité</Link>
+            <Link to="/mentions-legales">Mentions légales</Link>
             <SupportWhatsApp label="Support WhatsApp" className="" />
             <button className="muted" style={{ padding: "4px 0", fontSize: 15 }} onClick={() => setLiteMode(!liteMode())}>
               Mode allégé : {liteMode() ? "activé" : "désactivé"}

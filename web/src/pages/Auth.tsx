@@ -48,6 +48,7 @@ export default function Auth({ mode }: { mode: "login" | "register" | "reset" })
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState<"form" | "code">("form");
   const [code, setCode] = useState("");
+  const [accept, setAccept] = useState(false);
   const set = (k: keyof typeof f) => (e: any) => setF({ ...f, [k]: e.target.value });
 
   async function sendCode() {
@@ -72,7 +73,7 @@ export default function Auth({ mode }: { mode: "login" | "register" | "reset" })
           ? await post("/auth/login", { phone: f.phone, password: f.password })
           : mode === "reset"
             ? await post("/auth/reset", { phone: f.phone, password: f.password, code })
-            : await post("/auth/register", { ...f, role, code, ref: sp.get("ref") || undefined });
+            : await post("/auth/register", { ...f, role, code, accept_terms: accept, ref: sp.get("ref") || undefined });
       login(r.token, r.user);
       toast(mode === "login" ? `Content de te revoir, ${r.user.name.split(" ")[0]}` : mode === "reset" ? "Mot de passe changé" : "Compte créé", undefined, "ok");
       const next = sp.get("suite");
@@ -194,6 +195,26 @@ export default function Auth({ mode }: { mode: "login" | "register" | "reset" })
                 required
               />
             </label>
+            {mode === "register" && (
+              <label className="row" style={{ gap: 10, alignItems: "start", fontSize: 13.5 }}>
+                <input type="checkbox" checked={accept} onChange={(e) => setAccept(e.target.checked)} required style={{ marginTop: 3 }} />
+                <span className="muted">
+                  J'ai 18 ans ou plus et j'accepte les{" "}
+                  <Link to="/cgu" target="_blank" className="red">
+                    conditions générales
+                  </Link>
+                  , les{" "}
+                  <Link to="/regles" target="_blank" className="red">
+                    règles des enchères
+                  </Link>{" "}
+                  et la{" "}
+                  <Link to="/confidentialite" target="_blank" className="red">
+                    politique de confidentialité
+                  </Link>
+                  .
+                </span>
+              </label>
+            )}
             {err && <p className="err">{err}</p>}
             <button className="btn btn-red btn-lg btn-block" disabled={busy}>
               {busy ? "Un instant…" : mode === "login" ? "Se connecter" : "Recevoir le code par SMS"}

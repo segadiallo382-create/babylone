@@ -86,11 +86,12 @@ db.prepare("UPDATE users SET strikes = 0 WHERE phone = '781234567'").run();
 console.log("Inscription par code SMS + parrainage");
 const newPhone = "76" + String(Date.now()).slice(-7);
 const ref = (await call("/me/referrals", buyer)).code;
-ok((await call("/auth/register", null, { name: "Test Filleul", phone: newPhone, password: "secret1", code: "000000" })).status === 400, "inscription refusée sans code valide");
+ok((await call("/auth/register", null, { name: "Test Filleul", phone: newPhone, password: "secret1", code: "000000", accept_terms: true })).status === 400, "inscription refusée sans code valide");
 const otp = await call("/auth/otp", null, { phone: newPhone, purpose: "register" });
 ok(otp.sent && otp.dev_code, "code SMS envoyé (simulé en démo)");
 ok((await call("/auth/otp", null, { phone: newPhone, purpose: "register" })).status === 429, "renvoi limité à 1 par minute");
-const reg = await call("/auth/register", null, { name: "Test Filleul", phone: newPhone, password: "secret1", code: otp.dev_code, ref });
+ok((await call("/auth/register", null, { name: "Test Filleul", phone: newPhone, password: "secret1", code: otp.dev_code, ref })).status === 400, "inscription refusée sans acceptation des CGU");
+const reg = await call("/auth/register", null, { name: "Test Filleul", phone: newPhone, password: "secret1", code: otp.dev_code, ref, accept_terms: true });
 ok(reg.token && reg.user.phone_verified, "compte créé, téléphone vérifié");
 ok((await call("/me/referrals", buyer)).referrals.length >= 1, "filleul rattaché au parrain");
 const otp2 = await call("/auth/otp", null, { phone: newPhone, purpose: "reset" });
@@ -237,7 +238,7 @@ ok((await call("/me/profile", buyer, { payout_method: "wave", payout_account: "7
 ok((await fetch(B + "/me/export", { headers: { authorization: `Bearer ${buyer}` } })).ok, "export des données personnelles");
 const delPhone = "75" + String(Date.now()).slice(-7);
 const dotp = await call("/auth/otp", null, { phone: delPhone, purpose: "register" });
-const dreg = await call("/auth/register", null, { name: "A Supprimer", phone: delPhone, password: "secret1", code: dotp.dev_code });
+const dreg = await call("/auth/register", null, { name: "A Supprimer", phone: delPhone, password: "secret1", code: dotp.dev_code, accept_terms: true });
 ok((await call("/me/delete", dreg.token, { password: "secret1" })).ok, "suppression du compte");
 ok((await call("/auth/login", null, { phone: delPhone, password: "secret1" })).status === 401, "compte supprimé : connexion impossible");
 

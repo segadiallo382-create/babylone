@@ -205,13 +205,14 @@ app.post(
     if (!password || String(password).length < 6) throw bad("Mot de passe : 6 caractères minimum.");
     if (!["buyer", "seller"].includes(role)) throw bad("Rôle invalide.");
     if (!CITIES[city]) throw bad("Ville inconnue.");
+    if (req.body.accept_terms !== true) throw bad("Accepte les conditions générales et la politique de confidentialité pour créer ton compte.");
     if (one("SELECT 1 FROM users WHERE phone = ?", phone)) throw bad("Ce numéro a déjà un compte. Connecte-toi.");
     checkOtp(phone, "register", req.body.code);
     const referrer = req.body.ref ? one("SELECT id FROM users WHERE referral_code = ?", String(req.body.ref).toUpperCase()) : null;
     const { salt, hash } = hashPassword(String(password));
     const r = run(
-      `INSERT INTO users (phone, name, role, password_hash, salt, city, shop_name, phone_verified, referral_code, referred_by, last_ip, created_at)
-       VALUES (?,?,?,?,?,?,?,1,?,?,?,?)`,
+      `INSERT INTO users (phone, name, role, password_hash, salt, city, shop_name, phone_verified, referral_code, referred_by, last_ip, created_at, terms_accepted_at)
+       VALUES (?,?,?,?,?,?,?,1,?,?,?,?,?)`,
       phone,
       String(name).trim().slice(0, 60),
       role,
@@ -222,6 +223,7 @@ app.post(
       newReferral(name),
       referrer?.id ?? null,
       req.ip,
+      Date.now(),
       Date.now(),
     );
     trackEvent("signup", { userId: Number(r.lastInsertRowid) });

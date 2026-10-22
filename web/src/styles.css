@@ -1867,6 +1867,25 @@ button {
 .legal ul {
   padding-left: 20px;
 }
+.legal section {
+  scroll-margin-top: calc(var(--nav-h) + 20px);
+}
+.legal-toc {
+  display: grid;
+  gap: 6px;
+  margin: 24px 0 8px;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--card);
+  font-size: 14px;
+}
+.legal-toc a {
+  color: var(--muted);
+}
+.legal-toc a:hover {
+  color: var(--text);
+}
 .switch {
   width: 46px;
   height: 26px;
@@ -2151,8 +2170,17 @@ button {
   .bottom-bar,
   .demo-banner,
   .no-print,
-  .toasts {
+  .toasts,
+  .ai-fab,
+  .ai-panel,
+  .legal-toc,
+  .legal-links {
     display: none !important;
+  }
+  .legal h2,
+  .legal p,
+  .legal li {
+    color: #000;
   }
   .page {
     padding: 0;

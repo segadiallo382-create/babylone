@@ -85,6 +85,7 @@ export function App() {
             <Route path="/mot-de-passe-oublie" element={<Page><Auth mode="reset" /></Page>} />
             <Route path="/cgu" element={<Page><Legal doc="cgu" /></Page>} />
             <Route path="/confidentialite" element={<Page><Legal doc="privacy" /></Page>} />
+            <Route path="/mentions-legales" element={<Page><Legal doc="mentions" /></Page>} />
             <Route path="/regles" element={<Page><Legal doc="rules" /></Page>} />
             <Route path="/vendre" element={<Page><Sell /></Page>} />
             <Route path="/compte/commandes/:id" element={<Page><Guard><OrderPage /></Guard></Page>} />
