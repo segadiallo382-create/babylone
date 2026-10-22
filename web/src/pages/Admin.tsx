@@ -13,7 +13,7 @@ type Data = {
   pending: (Auction & { ai_review: { verdict: string; summary: string; reasons: string[] } | null })[];
   flags: { id: number; kind: string; detail: string; name: string; title: string; auction_id: number; user_id: number; created_at: number }[];
   outbox: { id: number; channel: string; recipient: string; body: string; status: string; error: string | null; created_at: number }[];
-  integrations: { paydunya: "live" | "test" | null; wave: boolean; sms: boolean; whatsapp: boolean; demo: boolean; bots: boolean; public_url: string | null; ai: { enabled: boolean; model: string | null; moderation: string; calls_today: number; daily_limit: number } };
+  integrations: { paydunya: "live" | "test" | null; wave: boolean; sms: boolean; whatsapp: boolean; demo: boolean; bots: boolean; public_url: string | null; ai: { enabled: boolean; model: string | null; moderation: string; calls_today: number; daily_limit: number; last_error: { status: number | null; message: string; at: number } | null } };
 };
 type Tab = "orders" | "moderation" | "sellers" | "fraud" | "outbox" | "integrations" | "analytics" | "payouts" | "audit" | "backups";
 
@@ -322,7 +322,11 @@ function Integrations({ i, reload }: { i: Data["integrations"]; reload: () => vo
       "Assistant IA (Claude)",
       "ANTHROPIC_API_KEY, AI_MODEL, AI_MODERATION, AI_DAILY_LIMIT",
       i.ai.enabled,
-      i.ai.enabled ? `${i.ai.model} · ${i.ai.calls_today}/${i.ai.daily_limit} appels aujourd'hui` : "Non configuré",
+      !i.ai.enabled
+        ? "Non configuré"
+        : i.ai.last_error
+          ? `Erreur ${i.ai.last_error.status ?? ""} : ${i.ai.last_error.message}`
+          : `${i.ai.model} · ${i.ai.calls_today}/${i.ai.daily_limit} appels aujourd'hui`,
       null,
     ],
     ["Mode démo", "DEMO_MODE, DEMO_BOTS", !i.demo, i.demo ? `Actif${i.bots ? ", acheteurs fictifs en marche" : ""}` : "Coupé", null],

@@ -29,7 +29,10 @@ const DAILY_LIMIT = Number(process.env.AI_DAILY_LIMIT || 2000);
 const PUBLIC_URL = () => process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || "http://localhost:4000";
 
 let client;
-const claude = () => (client ??= new Anthropic());
+// Clé collée avec des espaces ou des guillemets dans Render : on nettoie
+const KEY = process.env.ANTHROPIC_API_KEY?.trim().replace(/^["']|["']$/g, "");
+const claude = () => (client ??= KEY ? new Anthropic({ apiKey: KEY }) : new Anthropic());
+let lastError = null; // dernière erreur de l'API, affichée dans Admin → Intégrations
 
 // Plafond d'appels par jour : protège la facture si quelqu'un abuse de l'assistant
 const usage = { day: "", n: 0 };
@@ -55,6 +58,7 @@ async function call(params) {
     // Erreur de l'API (clé invalide, quota, panne) : détail dans les logs, message simple pour l'utilisateur
     if (!(e instanceof Anthropic.APIError)) throw e;
     console.error("Claude API", e.status, e.message);
+    lastError = { status: e.status ?? null, message: String(e.message).slice(0, 300), at: Date.now() };
     const busy = e instanceof Anthropic.RateLimitError || e instanceof Anthropic.InternalServerError;
     throw Object.assign(new Error(busy ? "L'assistant est surchargé. Réessaie dans une minute." : "Assistant IA indisponible pour le moment."), { status: 503 });
   }
@@ -418,4 +422,4 @@ export function reviewInBackground(auctionId) {
   reviewListing(auctionId).catch((e) => console.error("Modération IA", auctionId, e.message));
 }
 
-export const aiStatus = () => ({ enabled: AI_ENABLED, model: AI_ENABLED ? MODEL : null, moderation: MODERATION, calls_today: usage.n, daily_limit: DAILY_LIMIT });
+export const aiStatus = () => ({ enabled: AI_ENABLED, model: AI_ENABLED ? MODEL : null, moderation: MODERATION, calls_today: usage.n, daily_limit: DAILY_LIMIT, last_error: lastError });
