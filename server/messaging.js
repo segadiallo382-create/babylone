@@ -35,7 +35,7 @@ async function orangeAuth() {
     headers: { Authorization: `Basic ${basic}`, "Content-Type": "application/x-www-form-urlencoded" },
     body: "grant_type=client_credentials",
   });
-  if (!res.ok) throw new Error(`Orange auth ${res.status}`);
+  if (!res.ok) throw new Error(`Orange auth ${res.status} ${(await res.text()).slice(0, 300)}`);
   const j = await res.json();
   orangeToken = { value: j.access_token, exp: Date.now() + j.expires_in * 1000 };
   return orangeToken.value;
@@ -62,7 +62,7 @@ export async function sendSMS(phone, text, userId = null) {
         },
       }),
     });
-    if (!res.ok) throw new Error(`Orange SMS ${res.status}`);
+    if (!res.ok) throw new Error(`Orange SMS ${res.status} ${(await res.text()).slice(0, 300)}`);
     log(userId, "sms", to, null, text, "sent");
     return { sent: true };
   } catch (e) {

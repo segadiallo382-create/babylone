@@ -933,10 +933,12 @@ app.post(
   requireRole("admin"),
   wrap(async (req, res) => {
     const phone = normPhone(req.body.phone || req.user.phone);
+    // sendSMS relance l'erreur du fournisseur : on la renvoie telle quelle à l'admin
+    const attempt = (p) => p.catch((e) => Promise.reject(bad(`Échec : ${e.message}`, 502)));
     if (req.params.channel === "sms") {
-      await sendSMS(phone, "Babylone : test d'envoi SMS réussi.", req.user.id);
+      await attempt(sendSMS(phone, "Babylone : test d'envoi SMS réussi.", req.user.id));
     } else if (req.params.channel === "whatsapp") {
-      await sendWhatsApp({ id: req.user.id, phone, whatsapp: 1 }, "Test Babylone", "Les alertes WhatsApp fonctionnent.", "/");
+      await attempt(sendWhatsApp({ id: req.user.id, phone, whatsapp: 1 }, "Test Babylone", "Les alertes WhatsApp fonctionnent.", "/"));
     } else if (req.params.channel === "payment") {
       const c = await createCheckout({ id: 0, amount: 200, delivery_fee: 0 }, "wave", "Test de paiement Babylone");
       return res.json({ ok: true, redirect: c.redirect, demo: c.demo });
